@@ -115,8 +115,6 @@ module Trove
         else
           ah.each { |k, v| ah[k] = h2a v }
         end
-      elsif aa = a.as_a?
-        (0..aa.size - 1).each { |i| aa[i] = h2a aa[i] }
       end
       a
     end
