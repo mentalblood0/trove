@@ -1,0 +1,13 @@
+name: trove
+version: 0.1.0
+
+authors:
+  - mentalblood0 <necheporenko.stepan@yandex.ru>
+
+dependencies:
+  sophia:
+    github: mentalblood0/sophia
+
+crystal: '>= 1.16.3'
+
+license: MIT
