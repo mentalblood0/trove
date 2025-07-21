@@ -35,11 +35,13 @@ module Trove
     protected def decode(s : String)
       return nil if s.empty?
       case s[0]
-      when 's'
+      when 'u'
         s[1..].gsub(/\\u([0-9a-fA-F]{4})/) do |m|
           c = $1.to_i(16)
           c.chr
         end
+      when 's'
+        s[1..]
       when 'i'
         s[1..].to_i64
       when 'f'
@@ -55,10 +57,16 @@ module Trove
       pj = p.join '.'
       oe = case o
            when String
+             pfx = 's'
              os = o.gsub(/./) do |s|
-               s[0].ord <= 127 ? s : "\\u#{s[0].ord.to_s(16).rjust(4, '0')}"
+               if s[0].ord <= 127
+                 s
+               else
+                 pfx = 'u'
+                 "\\u#{s[0].ord.to_s(16).rjust(4, '0')}"
+               end
              end
-             "s#{os}"
+             "#{pfx}#{os}"
            when Int64
              "i#{o}"
            when Float64
