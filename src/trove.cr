@@ -166,5 +166,23 @@ module Trove
       return flat[""] if flat.has_key? ""
       h2a A.new nest flat
     end
+
+    def []?(i : Oid, *p : String)
+      self[i, p]?
+    end
+
+    def delete(i : Oid, p : Array(String) = [] of String)
+      @sophia.transaction do |tx|
+        @sophia.from({di0: i[0], di1: i[1], dp: p.join '.'}) do |d|
+          break unless d[:di0] == i[0] && d[:di1] == i[1]
+          tx.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
+          tx.delete({ip: d[:dp], iv: d[:dv]})
+        end
+      end
+    end
+
+    def delete(i : Oid, *p : String)
+      self.delete i, p
+    end
   end
 end

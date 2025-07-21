@@ -26,11 +26,12 @@ describe Trove do
     ["a", "b", "c"],
     COMPLEX_STRUCTURE,
   ].each do |o|
-    it "add #{o}" do
+    it "add/delete #{o}" do
       j = o.to_json
       i = chest << JSON.parse j
-      r = chest[i]?
-      r.should eq o
+      chest[i]?.should eq o
+      chest.delete i
+      chest[i]?.should eq nil
     end
   end
 end
