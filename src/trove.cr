@@ -48,8 +48,7 @@ module Trove
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : Array(String), o : String | Int64 | Float64 | Bool | Nil)
-      pj = p.join '.'
+    protected def add(tx : Env, i : Oid, p : String, o : String | Int64 | Float64 | Bool | Nil)
       oe = case o
            when String
              "s#{o}"
@@ -66,23 +65,23 @@ module Trove
            else
              raise "Can not encode #{o}"
            end
-      tx << {di0: i[0], di1: i[1], dp: pj, dv: oe}
-      tx << {ip: pj, iv: oe, ii0: i[0], ii1: i[1]}
+      tx << {di0: i[0], di1: i[1], dp: p, dv: oe}
+      tx << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
     end
 
-    protected def add(tx : Env, i : Oid, p : Array(String), o : H)
+    protected def add(tx : Env, i : Oid, p : String, o : H)
       o.each do |k, v|
-        add tx, i, (p + [k]), v
+        add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : Array(String), o : Array(A))
+    protected def add(tx : Env, i : Oid, p : String, o : Array(A))
       o.each_with_index do |v, k|
-        add tx, i, (p + [k.to_s]), v
+        add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : Array(String), o : A)
+    protected def add(tx : Env, i : Oid, p : String, o : A)
       if os = o.as_s?
         add tx, i, p, os
       elsif oi = o.as_i64?
@@ -103,7 +102,7 @@ module Trove
     def <<(o : A)
       i = oid
       @sophia.transaction do |tx|
-        add tx, i, [] of String, o
+        add tx, i, "", o
       end
       i
     end
