@@ -57,16 +57,18 @@ module Trove
       pj = p.join '.'
       oe = case o
            when String
-             pfx = 's'
-             os = o.gsub(/./) do |s|
-               if s[0].ord <= 127
-                 s
-               else
-                 pfx = 'u'
-                 "\\u#{s[0].ord.to_s(16).rjust(4, '0')}"
+             if o.ascii_only?
+               "s#{o}"
+             else
+               os = o.gsub(/./) do |s|
+                 if s[0].ord <= 127
+                   s
+                 else
+                   "\\u#{s[0].ord.to_s(16).rjust(4, '0')}"
+                 end
                end
+               "u#{os}"
              end
-             "#{pfx}#{os}"
            when Int64
              "i#{o}"
            when Float64
@@ -126,27 +128,14 @@ module Trove
     def h2a(a : A) : A
       if ah = a.as_h?
         if ah.has_key? "0"
-          r = AA.new
-          i = 0
-          while ah.has_key? i.to_s
-            r << h2a ah[i.to_s]
-            i += 1
-          end
-          A.new r
+          return A.new AA.new(ah.size) { |i| h2a ah[i.to_s] }
         else
-          ah.each do |k, v|
-            ah[k] = h2a v
-          end
-          A.new ah
+          ah.each { |k, v| ah[k] = h2a v }
         end
       elsif aa = a.as_a?
-        (0..aa.size - 1).each do |i|
-          aa[i] = h2a aa[i]
-        end
-        A.new aa
-      else
-        a
+        (0..aa.size - 1).each { |i| aa[i] = h2a aa[i] }
       end
+      a
     end
 
     protected def nest(h : H)
