@@ -53,7 +53,7 @@ module Trove
       end
     end
 
-    protected def payload(i : Oid, p : Array(String), o : String | Int64 | Float64 | Bool | Nil)
+    protected def add(tx : Env, i : Oid, p : Array(String), o : String | Int64 | Float64 | Bool | Nil)
       pj = p.join '.'
       oe = case o
            when String
@@ -82,46 +82,45 @@ module Trove
            else
              raise "Can not encode #{o}"
            end
-      [{di0: i[0], di1: i[1], dp: pj, dv: oe}, {ip: pj, iv: oe, ii0: i[0], ii1: i[1]}]
+      tx << {di0: i[0], di1: i[1], dp: pj, dv: oe}
+      tx << {ip: pj, iv: oe, ii0: i[0], ii1: i[1]}
     end
 
-    protected def payload(i : Oid, p : Array(String), o : H)
-      r = [] of Record
+    protected def add(tx : Env, i : Oid, p : Array(String), o : H)
       o.each do |k, v|
-        r += payload i, (p + [k]), v
+        add tx, i, (p + [k]), v
       end
-      r
     end
 
-    protected def payload(i : Oid, p : Array(String), o : Array(A))
-      r = [] of Record
+    protected def add(tx : Env, i : Oid, p : Array(String), o : Array(A))
       o.each_with_index do |v, k|
-        r += payload i, (p + [k.to_s]), v
+        add tx, i, (p + [k.to_s]), v
       end
-      r
     end
 
-    protected def payload(i : Oid, p : Array(String), o : A)
+    protected def add(tx : Env, i : Oid, p : Array(String), o : A)
       if os = o.as_s?
-        payload i, p, os
+        add tx, i, p, os
       elsif oi = o.as_i64?
-        payload i, p, oi
+        add tx, i, p, oi
       elsif of = o.as_f?
-        payload i, p, of
+        add tx, i, p, of
       elsif (ob = o.as_bool?) != nil
-        payload i, p, ob.not_nil!
+        add tx, i, p, ob.not_nil!
       elsif oh = o.as_h?
-        payload i, p, oh
+        add tx, i, p, oh
       elsif oa = o.as_a?
-        payload i, p, oa
+        add tx, i, p, oa
       else
-        payload i, p, o.as_nil
+        add tx, i, p, o.as_nil
       end
     end
 
     def <<(o : A)
       i = oid
-      @sophia << payload i, [] of String, o
+      @sophia.transaction do |tx|
+        add tx, i, [] of String, o
+      end
       i
     end
 
