@@ -16,8 +16,11 @@ Benchmark.ips do |b|
     chest << cs
   end
   i = chest << cs
-  b.report "get" do
+  b.report "get full" do
     raise "Can not get" if chest[i]? != cs
+  end
+  b.report "get field" do
+    raise "Can not get" if chest[i, "level1.level2.level3.1.metadata.level4.level5.level6.note"]? != "This is six levels deep"
   end
   b.report "get oid from index" do
     chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }

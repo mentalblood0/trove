@@ -41,6 +41,9 @@ describe Trove do
         o.each_with_index { |v, k| chest.where(k.to_s, v) { |ii| ii.should eq i } }
       when Hash(String, String)
         o.each { |k, v| chest.where(k.to_s, v) { |ii| ii.should eq i } }
+      when COMPLEX_STRUCTURE
+        puts "index test"
+        chest[i, "level1.level2.level3.1.metadata.level4.level5.level6.note"]?.should eq "This is six levels deep"
       end
 
       chest.delete i

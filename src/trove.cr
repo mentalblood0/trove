@@ -111,11 +111,12 @@ module Trove
     def []?(i : Oid, p : String = "")
       flat = H.new
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
-        break unless d[:di0] == i[0] && d[:di1] == i[1]
+        break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
         flat[d[:dp]] = A.new decode d[:dv]
       end
-      return nil unless flat.size > 0
+      return nil if flat.size == 0
       return flat[""] if flat.has_key? ""
+      return flat.values.first if flat.size == 1 && p.size != 0
       h2a A.new nest flat
     end
 
