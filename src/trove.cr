@@ -5,9 +5,6 @@ require "sophia"
 
 module Trove
   alias Oid = {UInt64, UInt64}
-  alias DataRecord = {di0: UInt64, di1: UInt64, dp: String, dv: String}
-  alias IndexRecord = {ip: String, iv: String, ii0: UInt64, ii1: UInt64}
-  alias Record = DataRecord | IndexRecord
   alias A = JSON::Any
   alias H = Hash(String, A)
   alias AA = Array(A)
@@ -26,8 +23,7 @@ module Trove
     end
 
     protected def oid : Oid
-      uuid = UUID.v7
-      b = uuid.bytes.to_slice
+      b = UUID.v7.bytes.to_slice
       {IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
        IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
     end
@@ -48,7 +44,7 @@ module Trove
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : String, o : String | Int64 | Float64 | Bool | Nil | H | AA)
+    protected def add(tx : Env, i : Oid, p : String, o : A::Type)
       oe = case o
            when H
              o.each { |k, v| add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
@@ -112,9 +108,9 @@ module Trove
       r
     end
 
-    def []?(i : Oid, p : Array(String) = [] of String)
+    def []?(i : Oid, p : String = "")
       flat = H.new
-      @sophia.from({di0: i[0], di1: i[1], dp: p.join '.'}) do |d|
+      @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
         break unless d[:di0] == i[0] && d[:di1] == i[1]
         flat[d[:dp]] = A.new decode d[:dv]
       end
@@ -127,9 +123,9 @@ module Trove
       self[i, p]?
     end
 
-    def delete(i : Oid, p : Array(String) = [] of String)
+    def delete(i : Oid, p : String = "")
       @sophia.transaction do |tx|
-        @sophia.from({di0: i[0], di1: i[1], dp: p.join '.'}) do |d|
+        @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
           break unless d[:di0] == i[0] && d[:di1] == i[1]
           tx.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
           tx.delete({ip: d[:dp], iv: d[:dv]})
@@ -139,6 +135,29 @@ module Trove
 
     def delete(i : Oid, *p : String)
       self.delete i, p
+    end
+
+    def where(p : String, v : String | Int64 | Float64 | Bool | Nil, &)
+      ve = case v
+           when String
+             "s#{v}"
+           when Int64
+             "i#{v}"
+           when Float64
+             "f#{v}"
+           when true
+             "T"
+           when false
+             "F"
+           when nil
+             ""
+           else
+             raise "Can not encode #{v}"
+           end
+      @sophia.from({ip: p, iv: ve}) do |d|
+        break unless d[:ip] == p && d[:iv] == ve
+        yield({d[:ii0], d[:ii1]})
+      end
     end
   end
 end

@@ -9,15 +9,17 @@ chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}
 
 Benchmark.ips do |b|
   cs = JSON.parse COMPLEX_STRUCTURE.to_json
-  b.report "set/delete" do
+  b.report "set+delete" do
     chest.delete chest << cs
   end
   b.report "set" do
     chest << cs
   end
-  i = (chest << cs)
-  raise "Can not get" if chest[i]? != cs
+  i = chest << cs
   b.report "get" do
-    chest[i]?
+    raise "Can not get" if chest[i]? != cs
+  end
+  b.report "get oid from index" do
+    chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
   end
 end
