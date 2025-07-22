@@ -14,9 +14,9 @@ module Trove
                                     dp: String},
                               value: {dv: String}},
                           i: {key: {ip: String,
-                                    iv: String},
-                              value: {ii0: UInt64,
-                                      ii1: UInt64}}}
+                                    iv: String,
+                                    ii0: UInt64,
+                                    ii1: UInt64}}}
 
   class Chest
     def initialize(@sophia : Env)
@@ -129,7 +129,7 @@ module Trove
         @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
           break unless d[:di0] == i[0] && d[:di1] == i[1]
           tx.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
-          tx.delete({ip: d[:dp], iv: d[:dv]})
+          tx.delete({ip: d[:dp], iv: d[:dv], ii0: d[:di0], ii1: d[:di1]})
         end
       end
     end
@@ -161,15 +161,10 @@ module Trove
 
     def where(p : String, v : I, &)
       ve = encode v
-      @sophia.from({ip: p, iv: ve}) do |i|
+      @sophia.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
         break unless i[:ip] == p && i[:iv] == ve
         yield({i[:ii0], i[:ii1]})
       end
-    end
-
-    def where!(p : String, v : I)
-      i = @sophia[{ip: p, iv: encode v}]?.not_nil!
-      {i[:ii0], i[:ii1]}
     end
   end
 end

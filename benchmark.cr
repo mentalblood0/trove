@@ -25,9 +25,6 @@ Benchmark.ips do |b|
   b.report "get field (only simple)" do
     raise "Can not get" if chest.get!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note") != "This is six levels deep"
   end
-  b.report "get oid from index (only first)" do
-    chest.where! "level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep"
-  end
 end
 Benchmark.ips do |b|
   n = 10**4 - 1
@@ -35,7 +32,9 @@ Benchmark.ips do |b|
   b.report "get one oid from index" do
     chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
   end
-  b.report "get #{n} oids from index" do
-    chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| next }
+  b.report "get #{n + 1} oids from index" do
+    g = 0
+    chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| g += 1 }
+    raise "#{g} != #{n + 1}" if g != n + 1
   end
 end
