@@ -48,8 +48,14 @@ module Trove
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : String, o : String | Int64 | Float64 | Bool | Nil)
+    protected def add(tx : Env, i : Oid, p : String, o : String | Int64 | Float64 | Bool | Nil | H | AA)
       oe = case o
+           when H
+             o.each { |k, v| add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+             return
+           when AA
+             o.each_with_index { |v, k| add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+             return
            when String
              "s#{o}"
            when Int64
@@ -69,40 +75,10 @@ module Trove
       tx << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
     end
 
-    protected def add(tx : Env, i : Oid, p : String, o : H)
-      o.each do |k, v|
-        add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v
-      end
-    end
-
-    protected def add(tx : Env, i : Oid, p : String, o : Array(A))
-      o.each_with_index do |v, k|
-        add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v
-      end
-    end
-
-    protected def add(tx : Env, i : Oid, p : String, o : A)
-      if os = o.as_s?
-        add tx, i, p, os
-      elsif oi = o.as_i64?
-        add tx, i, p, oi
-      elsif of = o.as_f?
-        add tx, i, p, of
-      elsif (ob = o.as_bool?) != nil
-        add tx, i, p, ob.not_nil!
-      elsif oh = o.as_h?
-        add tx, i, p, oh
-      elsif oa = o.as_a?
-        add tx, i, p, oa
-      else
-        add tx, i, p, o.as_nil
-      end
-    end
-
     def <<(o : A)
       i = oid
       @sophia.transaction do |tx|
-        add tx, i, "", o
+        add tx, i, "", o.raw
       end
       i
     end
