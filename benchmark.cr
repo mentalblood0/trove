@@ -16,8 +16,11 @@ Benchmark.ips do |b|
 end
 i = chest << cs
 Benchmark.ips do |b|
-  b.report "has key?" do
+  b.report "has key" do
     raise "Can not get" unless chest.has_key? i, "level1.level2.level3.1.metadata.level4.level5.level6.note"
+  end
+  b.report "has key (only simple)" do
+    raise "Can not get" unless chest.has_key! i, "level1.level2.level3.1.metadata.level4.level5.level6.note"
   end
   b.report "get full" do
     raise "Can not get" if chest.get(i) != cs
