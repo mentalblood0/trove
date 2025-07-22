@@ -5,7 +5,7 @@ require "./spec/common.cr"
 
 opts = Sophia::H{"compression"      => "zstd",
                  "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: Sophia::H.new, i: opts}
+chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts}
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
 
@@ -33,11 +33,11 @@ Benchmark.ips do |b|
   n = 10**4 - 1
   (1..n).each { chest << cs }
   b.report "get one oid from index" do
-    chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
+    chest.where!("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
   end
   b.report "get #{n + 1} oids from index" do
     g = 0
-    chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| g += 1 }
+    chest.where!("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| g += 1 }
     raise "#{g} != #{n + 1}" if g != n + 1
   end
 end

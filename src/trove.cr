@@ -82,7 +82,8 @@ module Trove
     def h2a(a : A) : A
       if ah = a.as_h?
         if ah.has_key? "0"
-          return A.new AA.new(ah.size) { |i| h2a ah[i.to_s] }
+          vs = ah.values
+          return A.new AA.new(ah.size) { |i| h2a vs[i] }
         else
           ah.each { |k, v| ah[k] = h2a v }
         end
@@ -109,6 +110,13 @@ module Trove
     end
 
     def has_key?(i : Oid, p : String = "")
+      @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
+        return true if d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
+      end
+      false
+    end
+
+    def has_key!(i : Oid, p : String = "")
       @sophia.has_key?({di0: i[0], di1: i[1], dp: p})
     end
 
@@ -116,16 +124,15 @@ module Trove
       flat = H.new
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
         break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
-        flat[d[:dp]] = A.new decode d[:dv]
+        flat[d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
       end
       return nil if flat.size == 0
       return flat[""] if flat.has_key? ""
-      return flat.values.first if flat.size == 1 && p.size != 0
       h2a A.new nest flat
     end
 
     def get!(i : Oid, p : String)
-      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv]
+      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
     def delete(i : Oid, p : String = "")
@@ -163,7 +170,7 @@ module Trove
       end
     end
 
-    def where(p : String, v : I, &)
+    def where!(p : String, v : I, &)
       ve = encode v
       @sophia.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
         break unless i[:ip] == p && i[:iv] == ve
