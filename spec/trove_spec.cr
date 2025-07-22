@@ -57,7 +57,7 @@ describe Trove do
     chest.where!("string.boolean", false) { |i| oids << i }
     oids.should eq [oid]
 
-    chest.where!("string.boolean", true) { |i| raise "Who is there?" }
+    chest.where!("string.boolean", true) { |i| raise "Who is here?" }
 
     oids = [] of Trove::Oid
     chest.where!("string.hello.0", "number") { |i| oids << i }
@@ -75,6 +75,7 @@ describe Trove do
     chest.get(oid, "string").should eq({"boolean" => false})
 
     chest.delete!(oid, "string.boolean")
+    chest.where!("string.boolean", false) { |i| raise "Who is here?" }
     chest.get(oid, "string").should eq nil
     chest.get(oid).should eq({"null" => nil, "array" => [1, ["two", false], [nil]]})
 

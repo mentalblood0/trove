@@ -146,7 +146,10 @@ module Trove
     end
 
     def delete!(i : Oid, p : String = "")
-      @sophia.delete({di0: i[0], di1: i[1], dp: p})
+      @sophia.transaction do |tx|
+        tx.delete({ip: p, iv: (@sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return), ii0: i[0], ii1: i[1]})
+        tx.delete({di0: i[0], di1: i[1], dp: p})
+      end
     end
 
     alias I = String | Int64 | Float64 | Bool | Nil
