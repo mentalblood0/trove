@@ -108,11 +108,7 @@ module Trove
       r
     end
 
-    def [](i : Oid, p : String)
-      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv]
-    end
-
-    def []?(i : Oid, p : String = "")
+    def get(i : Oid, p : String = "")
       flat = H.new
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
         break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
@@ -124,8 +120,8 @@ module Trove
       h2a A.new nest flat
     end
 
-    def []?(i : Oid, *p : String)
-      self[i, p]?
+    def get!(i : Oid, p : String)
+      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv]
     end
 
     def delete(i : Oid, p : String = "")
@@ -138,31 +134,42 @@ module Trove
       end
     end
 
-    def delete(i : Oid, *p : String)
-      self.delete i, p
+    def delete!(i : Oid, p : String = "")
+      @sophia.delete({di0: i[0], di1: i[1], dp: p})
     end
 
-    def where(p : String, v : String | Int64 | Float64 | Bool | Nil, &)
-      ve = case v
-           when String
-             "s#{v}"
-           when Int64
-             "i#{v}"
-           when Float64
-             "f#{v}"
-           when true
-             "T"
-           when false
-             "F"
-           when nil
-             ""
-           else
-             raise "Can not encode #{v}"
-           end
-      @sophia.from({ip: p, iv: ve}) do |d|
-        break unless d[:ip] == p && d[:iv] == ve
-        yield({d[:ii0], d[:ii1]})
+    alias I = String | Int64 | Float64 | Bool | Nil
+
+    protected def encode(v : I)
+      case v
+      when String
+        "s#{v}"
+      when Int64
+        "i#{v}"
+      when Float64
+        "f#{v}"
+      when true
+        "T"
+      when false
+        "F"
+      when nil
+        ""
+      else
+        raise "Can not encode #{v}"
       end
+    end
+
+    def where(p : String, v : I, &)
+      ve = encode v
+      @sophia.from({ip: p, iv: ve}) do |i|
+        break unless i[:ip] == p && i[:iv] == ve
+        yield({i[:ii0], i[:ii1]})
+      end
+    end
+
+    def where!(p : String, v : I)
+      i = @sophia[{ip: p, iv: encode v}]?.not_nil!
+      {i[:ii0], i[:ii1]}
     end
   end
 end
