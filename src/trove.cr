@@ -108,6 +108,10 @@ module Trove
       r
     end
 
+    def [](i : Oid, p : String)
+      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv]
+    end
+
     def []?(i : Oid, p : String = "")
       flat = H.new
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
