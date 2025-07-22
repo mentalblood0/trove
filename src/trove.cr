@@ -108,6 +108,10 @@ module Trove
       r
     end
 
+    def has_key?(i : Oid, p : String = "")
+      @sophia.has_key?({di0: i[0], di1: i[1], dp: p})
+    end
+
     def get(i : Oid, p : String = "")
       flat = H.new
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|

@@ -26,6 +26,9 @@ describe Trove do
     {"a" => {"b" => {"c" => "d"}}},
     ["a", "b", "c"],
     ["a"],
+    [1_i64, 2_i64, 3_i64],
+    [1_i64],
+    ["a", 1_i64, true, 0.0_f64],
     COMPLEX_STRUCTURE,
   ].each do |o|
     it "add+get+where+delete #{o}" do
@@ -37,18 +40,26 @@ describe Trove do
       case o
       when String, Int64, Float64, Bool, Nil
         chest.where("", o) { |ii| ii.should eq i }
-      when Array(String)
-        o.each_with_index { |v, k| chest.where(k.to_s, v) { |ii| ii.should eq i } }
+        chest.has_key?(i).should eq true
+      when Array
+        o.each_with_index do |v, k|
+          chest.has_key?(i, k.to_s).should eq true
+          chest.where(k.to_s, v) { |ii| ii.should eq i }
+        end
       when Hash(String, String)
-        o.each { |k, v| chest.where(k.to_s, v) { |ii| ii.should eq i } }
+        o.each do |k, v|
+          chest.has_key?(i, k).should eq true
+          chest.where(k.to_s, v) { |ii| ii.should eq i }
+        end
       when COMPLEX_STRUCTURE
-        puts "index test"
+        chest.has_key?(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq true
         chest.get(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
         chest.get!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
         chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
       end
 
       chest.delete i
+      chest.has_key?(i).should eq false
       chest.get(i).should eq nil
     end
   end
