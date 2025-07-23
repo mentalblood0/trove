@@ -19,13 +19,28 @@ module Trove
                                     ii1: UInt64}}}
 
   class Chest
-    def initialize(@sophia : Env)
+    property intx = false
+    getter env : Env
+
+    def initialize(@env : Env)
     end
 
     protected def oid : Oid
       b = UUID.v7.bytes.to_slice
       {IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
        IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
+    end
+
+    def transaction(&)
+      if @intx
+        yield self if @intx
+      else
+        @env.transaction do |tx|
+          r = Chest.new tx
+          r.intx = true
+          yield r
+        end
+      end
     end
 
     protected def decode(s : String)
@@ -44,13 +59,13 @@ module Trove
       end
     end
 
-    protected def add(tx : Env, i : Oid, p : String, o : A::Type)
+    protected def set(i : Oid, p : String, o : A::Type)
       oe = case o
            when H
-             o.each { |k, v| add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+             o.each { |k, v| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
              return
            when AA
-             o.each_with_index { |v, k| add tx, i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+             o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
              return
            when String
              "s#{o}"
@@ -67,19 +82,31 @@ module Trove
            else
              raise "Can not encode #{o}"
            end
-      tx << {di0: i[0], di1: i[1], dp: p, dv: oe}
-      tx << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
+      @env << {di0: i[0], di1: i[1], dp: p, dv: oe}
+      @env << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
+    end
+
+    def set(i : Oid, p : String, o : A)
+      transaction do |ttx|
+        ttx.delete i, p
+        ttx.set! i, p, o
+      end
+    end
+
+    def set!(i : Oid, p : String, o : A)
+      transaction do |ttx|
+        ttx.delete! i, p
+        ttx.set i, p, o.raw
+      end
     end
 
     def <<(o : A)
       i = oid
-      @sophia.transaction do |tx|
-        add tx, i, "", o.raw
-      end
+      set i, "", o
       i
     end
 
-    def h2a(a : A) : A
+    protected def h2a(a : A) : A
       if ah = a.as_h?
         if ah.has_key? "0"
           vs = ah.values
@@ -110,19 +137,19 @@ module Trove
     end
 
     def has_key?(i : Oid, p : String = "")
-      @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
+      @env.from({di0: i[0], di1: i[1], dp: p}) do |d|
         return d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
       end
       false
     end
 
     def has_key!(i : Oid, p : String = "")
-      @sophia.has_key?({di0: i[0], di1: i[1], dp: p})
+      @env.has_key?({di0: i[0], di1: i[1], dp: p})
     end
 
     def get(i : Oid, p : String = "")
       flat = H.new
-      @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
+      @env.from({di0: i[0], di1: i[1], dp: p}) do |d|
         break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
         flat[d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
       end
@@ -132,23 +159,23 @@ module Trove
     end
 
     def get!(i : Oid, p : String)
-      decode @sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue nil
+      decode @env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
     def delete(i : Oid, p : String = "")
-      @sophia.transaction do |tx|
-        @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
-          break unless d[:di0] == i[0] && d[:di1] == i[1]
-          tx.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
-          tx.delete({ip: d[:dp], iv: d[:dv], ii0: d[:di0], ii1: d[:di1]})
+      transaction do |ttx|
+        ttx.env.from({di0: i[0], di1: i[1], dp: p}) do |d|
+          break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
+          ttx.env.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
+          ttx.env.delete({ip: d[:dp], iv: d[:dv], ii0: d[:di0], ii1: d[:di1]})
         end
       end
     end
 
     def delete!(i : Oid, p : String = "")
-      @sophia.transaction do |tx|
-        tx.delete({ip: p, iv: (@sophia[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return), ii0: i[0], ii1: i[1]})
-        tx.delete({di0: i[0], di1: i[1], dp: p})
+      transaction do |ttx|
+        ttx.env.delete({ip: p, iv: (ttx.env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return), ii0: i[0], ii1: i[1]})
+        ttx.env.delete({di0: i[0], di1: i[1], dp: p})
       end
     end
 
@@ -175,7 +202,7 @@ module Trove
 
     def where!(p : String, v : I, &)
       ve = encode v
-      @sophia.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
+      @env.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
         break unless i[:ip] == p && i[:iv] == ve
         yield({i[:ii0], i[:ii1]})
       end
