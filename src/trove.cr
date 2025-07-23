@@ -111,7 +111,7 @@ module Trove
 
     def has_key?(i : Oid, p : String = "")
       @sophia.from({di0: i[0], di1: i[1], dp: p}) do |d|
-        return true if d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
+        return d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
       end
       false
     end
