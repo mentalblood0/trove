@@ -76,28 +76,51 @@ describe Trove do
     chest.where!("string.boolean", false) { |i| oids << i }
     oids.should eq [oid]
 
-    chest.where!("string.boolean", true) { |i| raise "Who is there?" }
+    chest.where!("string.boolean", true) { |i| raise "Who is here?" }
 
     oids = [] of Trove::Oid
     chest.where!("string.hello.0", "number") { |i| oids << i }
     oids.should eq [oid]
 
-    chest.delete!(oid, "string.hello")
+    chest.delete! oid, "string.hello"
     chest.get(oid, "string.hello").should eq ["number", 42, -4.2, 0.0]
 
-    chest.delete!(oid, "string.hello.2")
+    chest.delete! oid, "string.hello.2"
     chest.get(oid, "string.hello.2").should eq nil
     chest.get(oid, "string.hello").should eq ["number", 42, 0.0]
 
-    chest.delete(oid, "string.hello")
+    chest.delete oid, "string.hello"
     chest.get(oid, "string.hello").should eq nil
     chest.get(oid, "string").should eq({"boolean" => false})
 
-    chest.delete!(oid, "string.boolean")
+    chest.delete! oid, "string.boolean"
+    chest.where!("string.boolean", false) { |i| raise "Who is here?" }
     chest.get(oid, "string").should eq nil
     chest.get(oid).should eq({"null" => nil, "array" => [1, ["two", false], [nil]]})
 
-    chest.delete(oid)
+    chest.set oid, "string", parsed["string"]
+    chest.get(oid, "string").should eq parsed["string"]
+    chest.set oid, "string.boolean", JSON.parse %({"a": "b", "c": 4})
+    chest.get(oid, "string.boolean").should eq({"a" => "b", "c" => 4})
+
+    # set! works when overwriting simple values
+
+    chest.set! oid, "string.null", parsed["array"]
+    chest.get(oid, "string.null").should eq parsed["array"]
+
+    s = chest.get(oid, "string").not_nil!
+    begin
+      chest.transaction do |tx|
+        tx.delete oid, "string"
+        raise "oh no"
+        tx << s
+      end
+    rescue ex
+      ex.message.should eq "oh no"
+      chest.get(oid, "string").should eq s
+    end
+
+    chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
   end
