@@ -82,6 +82,14 @@ describe Trove do
     chest.where!("string.hello.0", "number") { |i| oids << i }
     oids.should eq [oid]
 
+    # where! looks for exact path match and where only for beginning of,
+    # so where is useful for arrays elements for example
+
+    chest.where!("string.hello", "number") { |i| raise "Who is here?" }
+    oids = [] of Trove::Oid
+    chest.where("string.hello", "number") { |i| oids << i }
+    oids.should eq [oid]
+
     chest.delete! oid, "string.hello"
     chest.get(oid, "string.hello").should eq ["number", 42, -4.2, 0.0]
 
