@@ -5,7 +5,7 @@ require "./spec/common.cr"
 
 opts = Sophia::H{"compression"      => "zstd",
                  "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts}
+chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
 k = "level1.level2.level3.1.metadata.level4.level5.level6.note"
@@ -37,6 +37,9 @@ end
 Benchmark.ips do |b|
   n = 10**4 - 1
   (1..n).each { chest << cs }
+  b.report "get one oid from index (unique)" do
+    chest.unique k, v
+  end
   b.report "get one oid from index" do
     chest.where!(k, v) { |ii| break }
   end

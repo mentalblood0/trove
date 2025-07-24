@@ -16,7 +16,11 @@ module Trove
                           i: {key: {ip: String,
                                     iv: String,
                                     ii0: UInt64,
-                                    ii1: UInt64}}}
+                                    ii1: UInt64}},
+                          u: {key: {up: String,
+                                    uv: String},
+                              value: {ui0: UInt64,
+                                      ui1: UInt64}}}
 
   class Chest
     property intx = false
@@ -84,6 +88,7 @@ module Trove
            end
       @env << {di0: i[0], di1: i[1], dp: p, dv: oe}
       @env << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
+      @env << {up: p, uv: oe, ui0: i[0], ui1: i[1]}
     end
 
     def set(i : Oid, p : String, o : A)
@@ -168,13 +173,16 @@ module Trove
           break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
           ttx.env.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
           ttx.env.delete({ip: d[:dp], iv: d[:dv], ii0: d[:di0], ii1: d[:di1]})
+          ttx.env.delete({up: d[:dp], uv: d[:dv]})
         end
       end
     end
 
     def delete!(i : Oid, p : String = "")
       transaction do |ttx|
-        ttx.env.delete({ip: p, iv: (ttx.env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return), ii0: i[0], ii1: i[1]})
+        v = ttx.env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return
+        ttx.env.delete({ip: p, iv: v, ii0: i[0], ii1: i[1]})
+        ttx.env.delete({up: p, uv: v})
         ttx.env.delete({di0: i[0], di1: i[1], dp: p})
       end
     end
@@ -214,6 +222,12 @@ module Trove
         break unless i[:ip] == p && i[:iv] == ve
         yield({i[:ii0], i[:ii1]})
       end
+    end
+
+    def unique(p : String, v : I)
+      u = @env[{up: p, uv: encode v}]?
+      return nil unless u
+      {u[:ui0], u[:ui1]}
     end
   end
 end

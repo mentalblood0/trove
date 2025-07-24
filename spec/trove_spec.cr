@@ -6,7 +6,7 @@ require "./common.cr"
 describe Trove do
   opts = Sophia::H{"compression"      => "zstd",
                    "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-  chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts}
+  chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
 
   it "example" do
     parsed = JSON.parse %({
@@ -70,6 +70,11 @@ describe Trove do
     oids = [] of Trove::Oid
     chest.where("string.hello", "number") { |i| oids << i }
     oids.should eq [oid]
+
+    # unique is faster than where,
+    # but works correct only for values that were always unique
+
+    chest.unique("string.boolean", false).should eq oid
 
     chest.delete! oid, "string.hello"
     chest.get(oid, "string.hello").should eq ["number", 42, -4.2, 0.0]
