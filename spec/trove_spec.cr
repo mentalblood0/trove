@@ -71,8 +71,8 @@ describe Trove do
     chest.where("string.hello", "number") { |i| oids << i }
     oids.should eq [oid]
 
-    # unique is faster than where,
-    # but works correct only for values that were always unique
+    # unique is way faster than where,
+    # but works correctly only for values that were always unique
 
     chest.unique("string.boolean", false).should eq oid
 
@@ -117,6 +117,13 @@ describe Trove do
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
+
+    chest.set oid, "", parsed
+    chest.delete oid
+    chest.get(oid).should eq nil
+    chest.get(oid, "null").should eq nil
+    chest.where!("string.boolean", false) { |i| raise "Who is here?" }
+    chest.where("string", false) { |i| raise "Who is here?" }
   end
 
   [
