@@ -200,6 +200,14 @@ module Trove
       end
     end
 
+    def where(p : String, v : I, &)
+      ve = encode v
+      @env.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
+        break unless i[:ip].starts_with?(p) && i[:iv] == ve
+        yield({i[:ii0], i[:ii1]})
+      end
+    end
+
     def where!(p : String, v : I, &)
       ve = encode v
       @env.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
