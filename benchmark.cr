@@ -5,7 +5,8 @@ require "./spec/common.cr"
 
 opts = Sophia::H{"compression"      => "zstd",
                  "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
+env = Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
+chest = Trove::Chest.new env
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
 k = "level1.level2.level3.1.metadata.level4.level5.level6.note"
@@ -16,7 +17,9 @@ Benchmark.ips do |b|
     chest.delete chest << cs
   end
 end
+
 i = chest << cs
+env.checkpoint
 Benchmark.ips do |b|
   b.report "has key" do
     raise "Can not get" unless chest.has_key? i, k
