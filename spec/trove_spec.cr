@@ -20,29 +20,29 @@ describe Trove do
     oid = chest << parsed
 
     chest.get(oid).should eq parsed
-    chest.get(oid, "dict").should eq({"hello" => ["number", 42, -4.2, 0.0], "boolean" => false})
-    chest.get(oid, "dict.hello").should eq ["number", 42, -4.2, 0.0]
-    chest.get(oid, "dict.boolean").should eq false
+    chest.get(oid, "dict").should eq parsed["dict"]
+    chest.get(oid, "dict.hello").should eq parsed["dict"]["hello"]
+    chest.get(oid, "dict.boolean").should eq parsed["dict"]["boolean"]
 
     # get! is faster than get, but expects simple value
     # because under the hood all values in trove are simple
     # and get! just gets value by key, without range scan
 
-    chest.get!(oid, "dict.boolean").should eq false
+    chest.get!(oid, "dict.boolean").should eq parsed["dict"]["boolean"]
     chest.get!(oid, "dict").should eq nil
-    chest.get!(oid, "dict.hello.0").should eq "number"
-    chest.get!(oid, "dict.hello.1").should eq 42
-    chest.get!(oid, "dict.hello.2").should eq -4.2
-    chest.get!(oid, "dict.hello.3").should eq 0.0
+    chest.get!(oid, "dict.hello.0").should eq parsed["dict"]["hello"][0]
+    chest.get!(oid, "dict.hello.1").should eq parsed["dict"]["hello"][1]
+    chest.get!(oid, "dict.hello.2").should eq parsed["dict"]["hello"][2]
+    chest.get!(oid, "dict.hello.3").should eq parsed["dict"]["hello"][3]
     chest.get!(oid, "null").should eq nil
     chest.get!(oid, "nonexistent.key").should eq nil
-    chest.get(oid, "array").should eq [1, ["two", false], [nil]]
-    chest.get!(oid, "array.0").should eq 1
-    chest.get(oid, "array.1").should eq ["two", false]
-    chest.get!(oid, "array.1.0").should eq "two"
-    chest.get!(oid, "array.1.1").should eq false
-    chest.get(oid, "array.2").should eq [nil]
-    chest.get!(oid, "array.2.0").should eq nil
+    chest.get(oid, "array").should eq parsed["array"]
+    chest.get!(oid, "array.0").should eq parsed["array"][0]
+    chest.get(oid, "array.1").should eq parsed["array"][1]
+    chest.get!(oid, "array.1.0").should eq parsed["array"][1][0]
+    chest.get!(oid, "array.1.1").should eq parsed["array"][1][1]
+    chest.get(oid, "array.2").should eq parsed["array"][2]
+    chest.get!(oid, "array.2.0").should eq parsed["array"][2][0]
 
     chest.has_key?(oid, "null").should eq true
     chest.has_key!(oid, "null").should eq true
