@@ -121,13 +121,19 @@ describe Trove do
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
+    chest.oids { raise "Who is here?" }
 
     chest.set oid, "", parsed
+    all_oids = [] of Trove::Oid
+    chest.oids { |i| all_oids << i }
+    all_oids.should eq [oid]
+
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
     chest.where!("dict.boolean", false) { |i| raise "Who is here?" }
     chest.where("dict", false) { |i| raise "Who is here?" }
+    chest.oids { raise "Who is here?" }
   end
 
   [
