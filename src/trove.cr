@@ -100,7 +100,8 @@ module Trove
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
         ttx.delete i, p
-        ttx.set! i, p, o
+        ttx.env << {oi0: i[0], oi1: i[1]}
+        ttx.set i, p, o.raw
       end
     end
 

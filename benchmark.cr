@@ -5,7 +5,7 @@ require "./spec/common.cr"
 
 opts = Sophia::H{"compression"      => "zstd",
                  "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-env = Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
+env = Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts, o: opts}
 chest = Trove::Chest.new env
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
