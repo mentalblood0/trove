@@ -134,10 +134,23 @@ describe Trove do
     chest.where!("dict.boolean", false) { |i| raise "Who is here?" }
     chest.where("dict", false) { |i| raise "Who is here?" }
     chest.oids { raise "Who is here?" }
+  end
 
-    nesc = JSON.parse %({"a.b.c": 1})
-    chest.set oid, "", nesc
-    chest.get(oid).should eq nesc
+  it "supports dots in keys" do
+    p = JSON.parse %({"a.b.c": 1})
+    i = chest << p
+    chest.get(i).should eq p
+    chest.delete i
+  end
+
+  it "supports removing first array element" do
+    p = JSON.parse %(["a", "b", "c"])
+    i = chest << p
+    chest.delete! i, "0"
+    chest.get(i).should eq ["b", "c"]
+    chest.set! i, "k", JSON.parse %("a")
+    chest.get(i).should eq({"k" => "a", "1" => "b", "2" => "c"})
+    chest.delete i
   end
 
   [

@@ -124,7 +124,7 @@ module Trove
 
     protected def h2a(a : A) : A
       if ah = a.as_h?
-        if ah.has_key? "0"
+        if ah.keys.all? { |k| k.to_u64 rescue nil }
           vs = ah.values
           return A.new AA.new(ah.size) { |i| h2a vs[i] }
         else
