@@ -20,7 +20,9 @@ module Trove
                           u: {key: {up: String,
                                     uv: String},
                               value: {ui0: UInt64,
-                                      ui1: UInt64}}}
+                                      ui1: UInt64}},
+                          o: {key: {oi0: UInt64,
+                                    oi1: UInt64}}}
 
   class Chest
     property intx = false
@@ -33,6 +35,10 @@ module Trove
       b = UUID.v7.bytes.to_slice
       {IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
        IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
+    end
+
+    def oids(&)
+      @env.from({oi0: 0_u64, oi1: 0_u64}) { |o| yield({o[:oi0], o[:oi1]}) }
     end
 
     def transaction(&)
@@ -101,6 +107,7 @@ module Trove
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
         ttx.delete! i, p
+        ttx.env << {oi0: i[0], oi1: i[1]}
         ttx.set i, p, o.raw
       end
     end
@@ -169,6 +176,7 @@ module Trove
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
+        ttx.env.delete({oi0: i[0], oi1: i[1]}) if p.empty?
         ttx.env.from({di0: i[0], di1: i[1], dp: p}) do |d|
           break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
           ttx.env.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})

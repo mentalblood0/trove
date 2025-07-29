@@ -6,7 +6,7 @@ require "./common.cr"
 describe Trove do
   opts = Sophia::H{"compression"      => "zstd",
                    "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-  chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts}
+  chest = Trove::Chest.new Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts, o: opts}
 
   it "example" do
     parsed = JSON.parse %({
@@ -50,6 +50,10 @@ describe Trove do
     chest.has_key!(oid, "dict").should eq false
     chest.has_key?(oid, "nonexistent.key").should eq false
     chest.has_key!(oid, "nonexistent.key").should eq false
+
+    all_oids = [] of Trove::Oid
+    chest.oids { |i| all_oids << i }
+    all_oids.should eq [oid]
 
     # indexes work for simple values
 
