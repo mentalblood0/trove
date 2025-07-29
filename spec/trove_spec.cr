@@ -134,6 +134,10 @@ describe Trove do
     chest.where!("dict.boolean", false) { |i| raise "Who is here?" }
     chest.where("dict", false) { |i| raise "Who is here?" }
     chest.oids { raise "Who is here?" }
+
+    nesc = JSON.parse %({"a.b.c": 1})
+    chest.set oid, "", nesc
+    chest.get(oid).should eq nesc
   end
 
   [

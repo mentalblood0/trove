@@ -72,7 +72,10 @@ module Trove
     protected def set(i : Oid, p : String, o : A::Type)
       oe = case o
            when H
-             o.each { |k, v| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+             o.each do |k, v|
+               ke = k.gsub(".", "\\.")
+               set i, p.empty? ? ke : "#{p}.#{ke}", v.raw
+             end
              return
            when AA
              o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
@@ -134,10 +137,11 @@ module Trove
     protected def nest(h : H)
       r = H.new
       h.each do |p, v|
-        ps = p.split '.'
+        ps = p.split /(?<!\\)\./
         c = r
 
-        ps.each_with_index do |k, i|
+        ps.each_with_index do |ke, i|
+          k = ke.gsub("\\.", ".")
           if i == ps.size - 1
             c[k] = v
           else
