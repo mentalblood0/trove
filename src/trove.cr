@@ -10,21 +10,21 @@ module Trove
   alias H = Hash(String, A)
   alias AA = Array(A)
 
-  Sophia.define_env Env, {d: {key: {di0: UInt64,
-                                    di1: UInt64,
-                                    dp: String},
-                              value: {dv: String}},
-                          i: {key: {ipv0: UInt64,
-                                    ipv1: UInt64,
-                                    ipi: UInt32,
-                                    ii0: UInt64,
-                                    ii1: UInt64}},
-                          u: {key: {upv0: UInt64,
-                                    upv1: UInt64},
-                              value: {ui0: UInt64,
-                                      ui1: UInt64}},
-                          o: {key: {oi0: UInt64,
-                                    oi1: UInt64}}}
+  Sophia.define_env Env, {d: {key: {di0: UInt64,     # data: oid first 64bits
+                                    di1: UInt64,     #       oid last 64bits
+                                    dp: String},     #       path
+                              value: {dv: String}},  #       value
+                          i: {key: {ipv0: UInt64,    # index: path and value digest first 64bits
+                                    ipv1: UInt64,    #        path and value digest last 64bit
+                                    ipi: UInt32,     #        path array index
+                                    ii0: UInt64,     #        oid first 64bits
+                                    ii1: UInt64}},   #        oid last 64bits
+                          u: {key: {upv0: UInt64,    # unique: path and value digest first 64bits
+                                    upv1: UInt64},   #         path and value digest last 64bits
+                              value: {ui0: UInt64,   #         oid first 64bits
+                                      ui1: UInt64}}, #         oid last 64bits
+                          o: {key: {oi0: UInt64,     # oids: first 64bits
+                                    oi1: UInt64}}}   #       last 64bits
 
   class Chest
     property intx = false
@@ -164,7 +164,7 @@ module Trove
     def get(i : Oid, p : String = "")
       flat = H.new
       @env.from({di0: i[0], di1: i[1], dp: p}) do |d|
-        break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
+        break unless {d[:di0], d[:di1]} == i && d[:dp].starts_with? p
         flat[d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
       end
       return nil if flat.size == 0
