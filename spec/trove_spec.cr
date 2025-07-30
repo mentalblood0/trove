@@ -83,6 +83,8 @@ describe Trove do
     chest.delete! oid, "dict.hello.2"
     chest.get(oid, "dict.hello.2").should eq nil
     chest.get(oid, "dict.hello").should eq ["number", 42, 0.0]
+    chest.where("dict.hello.2", -4.2) { |i| raise "Who is here?" }
+    chest.where("dict.hello", -4.2) { |i| raise "Who is here?" }
 
     chest.delete oid, "dict.hello"
     chest.get(oid, "dict.hello").should eq nil
