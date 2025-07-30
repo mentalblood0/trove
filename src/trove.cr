@@ -3,6 +3,15 @@ require "uuid"
 
 require "sophia"
 
+@[Link(ldflags: "#{__DIR__}/xxhash/xxhash.o")]
+lib LibXxhash
+  fun xxhash128 = XXH128(input : Void*, size : LibC::SizeT, seed : LibC::ULongLong) : XXH128_Hash
+
+  struct XXH128_Hash
+    low64, high64 : UInt64
+  end
+end
+
 module Trove
   alias Oid = {UInt64, UInt64}
   alias A = JSON::Any
@@ -70,34 +79,23 @@ module Trove
     end
 
     protected def set(i : Oid, p : String, o : A::Type)
-      oe = case o
-           when H
-             o.each do |k, v|
-               ke = k.gsub(".", "\\.")
-               set i, p.empty? ? ke : "#{p}.#{ke}", v.raw
-             end
-             return
-           when AA
-             o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
-             return
-           when String
-             "s#{o}"
-           when Int64
-             "i#{o}"
-           when Float64
-             "f#{o}"
-           when true
-             "T"
-           when false
-             "F"
-           when nil
-             ""
-           else
-             raise "Can not encode #{o}"
-           end
+      case o
+      when H
+        o.each do |k, v|
+          ke = k.gsub(".", "\\.")
+          set i, p.empty? ? ke : "#{p}.#{ke}", v.raw
+        end
+        return
+      when AA
+        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+        return
+      else
+        oe = encode o
+      end
       @env << {di0: i[0], di1: i[1], dp: p, dv: oe}
-      @env << {ip: p, iv: oe, ii0: i[0], ii1: i[1]}
-      @env << {up: p, uv: oe, ui0: i[0], ui1: i[1]}
+      iv = index_value p.bytesize + 16, oe
+      @env << {ip: p, iv: iv, ii0: i[0], ii1: i[1]}
+      @env << {up: p, uv: iv, ui0: i[0], ui1: i[1]}
     end
 
     def set(i : Oid, p : String, o : A)
@@ -185,8 +183,9 @@ module Trove
         ttx.env.from({di0: i[0], di1: i[1], dp: p}) do |d|
           break unless d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
           ttx.env.delete({di0: d[:di0], di1: d[:di1], dp: d[:dp]})
-          ttx.env.delete({ip: d[:dp], iv: d[:dv], ii0: d[:di0], ii1: d[:di1]})
-          ttx.env.delete({up: d[:dp], uv: d[:dv]})
+          iv = index_value d[:dp].bytesize + 16, d[:dv]
+          ttx.env.delete({ip: d[:dp], iv: iv, ii0: d[:di0], ii1: d[:di1]})
+          ttx.env.delete({up: d[:dp], uv: iv})
         end
       end
     end
@@ -221,24 +220,33 @@ module Trove
       end
     end
 
-    def where(p : String, v : I, &)
-      ve = encode v
-      @env.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
-        break unless i[:ip].starts_with?(p) && i[:iv] == ve
+    protected def index_value(os : Int32, ve : String)
+      if ve.bytesize < 1024
+        ve
+      else
+        d = LibXxhash.xxhash128 ve, ve.size, 0
+        "%016x%016x" % [d.high64, d.low64]
+      end
+    end
+
+    protected def where(p : String, strict : Bool, v : I, &)
+      iv = index_value p.bytesize + 16, encode v
+      @env.from({ip: p, iv: iv, ii0: 0_u64, ii1: 0_u64}) do |i|
+        break unless i[:iv] == iv && ((strict && i[:ip] == p) || (!strict && i[:ip].starts_with? p))
         yield({i[:ii0], i[:ii1]})
       end
+    end
+
+    def where(p : String, v : I, &)
+      where(p, false, v) { |i| yield i }
     end
 
     def where!(p : String, v : I, &)
-      ve = encode v
-      @env.from({ip: p, iv: ve, ii0: 0_u64, ii1: 0_u64}) do |i|
-        break unless i[:ip] == p && i[:iv] == ve
-        yield({i[:ii0], i[:ii1]})
-      end
+      where(p, true, v) { |i| yield i }
     end
 
     def unique(p : String, v : I)
-      u = @env[{up: p, uv: encode v}]?
+      u = @env[{up: p, uv: index_value p.bytesize + 16, encode v}]?
       return nil unless u
       {u[:ui0], u[:ui1]}
     end
