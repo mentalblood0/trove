@@ -7,10 +7,9 @@ authors:
 dependencies:
   sophia:
     github: mentalblood0/sophia
+  xxhash128:
+    github: mentalblood0/xxhash128
 
 crystal: '>= 1.16.3'
-
-scripts:
-  postinstall: cd src/xxhash && make || true
 
 license: MIT
