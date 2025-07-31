@@ -39,13 +39,18 @@ module Trove
        IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
     end
 
+    protected def digest(s : Bytes)
+      d = LibXxhash.xxhash128 s, s.size, 0
+      {d.high64, d.low64}
+    end
+
     def oids(&)
       @env.from({oi0: 0_u64, oi1: 0_u64}) { |o| yield({o[:oi0], o[:oi1]}) }
     end
 
     def transaction(&)
       if @intx
-        yield self if @intx
+        yield self
       else
         @env.transaction do |tx|
           r = Chest.new tx
@@ -55,7 +60,28 @@ module Trove
       end
     end
 
-    protected def decode(s : String)
+    alias I = String | Int64 | Float64 | Bool | Nil
+
+    protected def encode(v : I) : String
+      case v
+      when String
+        "s#{v}"
+      when Int64
+        "i#{v}"
+      when Float64
+        "f#{v}"
+      when true
+        "T"
+      when false
+        "F"
+      when nil
+        ""
+      else
+        raise "Can not encode #{v}"
+      end
+    end
+
+    protected def decode(s : String) : I
       return nil if s.empty?
       case s[0]
       when 's'
@@ -200,32 +226,6 @@ module Trove
       transaction do |ttx|
         delete i, p, (ttx.env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return)
       end
-    end
-
-    alias I = String | Int64 | Float64 | Bool | Nil
-
-    protected def encode(v : I)
-      case v
-      when String
-        "s#{v}"
-      when Int64
-        "i#{v}"
-      when Float64
-        "f#{v}"
-      when true
-        "T"
-      when false
-        "F"
-      when nil
-        ""
-      else
-        raise "Can not encode #{v}"
-      end
-    end
-
-    protected def digest(s : Bytes)
-      d = LibXxhash.xxhash128 s, s.size, 0
-      {d.high64, d.low64}
     end
 
     def where(p : String, v : I, &)
