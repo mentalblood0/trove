@@ -76,6 +76,8 @@ describe Trove do
     # but works correctly only for values that were always unique
 
     chest.unique("dict.boolean", false).should eq oid
+    chest.unique("dict.hello", "number").should eq oid
+    chest.unique("dict.hello", 42_i64).should eq oid
 
     chest.delete! oid, "dict.hello"
     chest.get(oid, "dict.hello").should eq ["number", 42, -4.2, 0.0]
