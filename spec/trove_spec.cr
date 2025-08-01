@@ -4,22 +4,23 @@ require "../src/trove"
 require "./common.cr"
 
 describe Trove do
-  env = Trove::Env.from_yaml <<-YAML
-  sophia:
-    path: /tmp/trove
-  db:
-    d: &ddbs
-      compression: zstd
-      compaction:
-        cache: 2_000_000_000
-    i:
-      <<: *ddbs
-    u:
-      <<: *ddbs
-    o:
-      <<: *ddbs
+  chest = Trove::Chest.from_yaml <<-YAML
+  env:
+    opts:
+      sophia:
+        path: /tmp/trove
+      db:
+        d: &ddbs
+          compression: zstd
+          compaction:
+            cache: 2_000_000_000
+        i:
+          *ddbs
+        u:
+          *ddbs
+        o:
+          *ddbs
   YAML
-  chest = Trove::Chest.new env
 
   it "example" do
     parsed = JSON.parse %({
@@ -167,7 +168,7 @@ describe Trove do
   end
 
   it "supports indexing large values" do
-    l = env.getint("db.i.limit.key").not_nil!
+    l = chest.env.getint("db.i.limit.key").not_nil!
     (l - 32).upto (l + 32) do |size|
       v = ["a" * size]
       j = v.to_json

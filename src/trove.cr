@@ -1,4 +1,5 @@
 require "json"
+require "yaml"
 require "uuid"
 require "xxhash128"
 
@@ -27,8 +28,13 @@ module Trove
                                     oi1: UInt64}}}   #       last 64bits
 
   class Chest
-    property intx = false
+    include YAML::Serializable
+    include YAML::Serializable::Strict
+
     getter env : Env
+
+    @[YAML::Field(ignore: true)]
+    property intx = false
 
     def initialize(@env : Env)
     end

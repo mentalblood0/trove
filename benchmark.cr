@@ -3,22 +3,23 @@ require "benchmark"
 require "./src/trove.cr"
 require "./spec/common.cr"
 
-env = Trove::Env.from_yaml <<-YAML
-sophia:
-  path: /tmp/trove
-db:
-  d: &ddbs
-    compression: zstd
-    compaction:
-      cache: 2_000_000_000
-  i:
-    <<: *ddbs
-  u:
-    <<: *ddbs
-  o:
-    <<: *ddbs
+chest = Trove::Chest.from_yaml <<-YAML
+env:
+  opts:
+    sophia:
+      path: /tmp/trove
+    db:
+      d: &ddbs
+        compression: zstd
+        compaction:
+          cache: 2_000_000_000
+      i:
+        *ddbs
+      u:
+        *ddbs
+      o:
+        *ddbs
 YAML
-chest = Trove::Chest.new env
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
 k = "level1.level2.level3.1.metadata.level4.level5.level6.note"
@@ -31,7 +32,7 @@ Benchmark.ips do |b|
 end
 
 i = chest << cs
-env.checkpoint
+chest.env.checkpoint
 Benchmark.ips do |b|
   b.report "has key" do
     raise "Can not get" unless chest.has_key? i, k
