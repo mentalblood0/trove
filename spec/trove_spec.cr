@@ -4,9 +4,21 @@ require "../src/trove"
 require "./common.cr"
 
 describe Trove do
-  opts = Sophia::H{"compression"      => "zstd",
-                   "compaction.cache" => 2_i64 * 1024 * 1024 * 1024}
-  env = Trove::Env.new Sophia::H{"sophia.path" => "/tmp/trove"}, {d: opts, i: opts, u: opts, o: opts}
+  env = Trove::Env.from_yaml <<-YAML
+  sophia:
+    path: /tmp/trove
+  db:
+    d: &ddbs
+      compression: zstd
+      compaction:
+        cache: 2_000_000_000
+    i:
+      <<: *ddbs
+    u:
+      <<: *ddbs
+    o:
+      <<: *ddbs
+  YAML
   chest = Trove::Chest.new env
 
   it "example" do
