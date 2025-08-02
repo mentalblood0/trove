@@ -50,6 +50,10 @@ module Trove
       {d.high64, d.low64}
     end
 
+    protected def digest(pb : String, ve : String)
+      digest [pb, ve].to_json.to_slice
+    end
+
     def oids(&)
       @env.from({oi0: 0_u64, oi1: 0_u64}) { |o| yield({o[:oi0], o[:oi1]}) }
     end
@@ -124,7 +128,7 @@ module Trove
       end
       @env << {di0: i[0], di1: i[1], dp: p, dv: oe}
       pp = partition p
-      d = digest (pp[:b] + oe).to_slice
+      d = digest pp[:b], oe
       @env << {ipv0: d[0], ipv1: d[1], ipi: pp[:i], ii0: i[0], ii1: i[1]}
       @env << {upv0: d[0], upv1: d[1], ui0: i[0], ui1: i[1]}
     end
@@ -212,7 +216,7 @@ module Trove
       transaction do |ttx|
         ttx.env.delete({di0: i[0], di1: i[1], dp: p})
         pp = partition p
-        dg = digest (pp[:b] + ve).to_slice
+        dg = digest pp[:b], ve
         ttx.env.delete({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: i[0], ii1: i[1]})
         ttx.env.delete({upv0: dg[0], upv1: dg[1]})
       end
@@ -236,7 +240,7 @@ module Trove
 
     def where(p : String, v : I, &)
       pp = partition p
-      dg = digest (pp[:b] + encode v).to_slice
+      dg = digest pp[:b], encode v
       @env.from({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: 0_u64, ii1: 0_u64}) do |i|
         break unless {i[:ipv0], i[:ipv1]} == dg
         yield({i[:ii0], i[:ii1]})
@@ -244,7 +248,7 @@ module Trove
     end
 
     def unique(p : String, v : I)
-      dg = digest (p + encode v).to_slice
+      dg = digest p, encode v
       u = @env[{upv0: dg[0], upv1: dg[1]}]?
       return nil unless u
       {u[:ui0], u[:ui1]}

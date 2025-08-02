@@ -182,6 +182,19 @@ describe Trove do
     end
   end
 
+  it "distinguishes in key/value pairs with same concatenaction result" do
+    i0 = chest << JSON.parse %({"as": "a"})
+    i1 = chest << JSON.parse %({"a": "sa"})
+
+    oids = [] of Trove::Oid
+    chest.where("as", "a") { |oid| oids << oid }
+    oids.should eq [i0]
+
+    oids = [] of Trove::Oid
+    chest.where("a", "sa") { |oid| oids << oid }
+    oids.should eq [i1]
+  end
+
   [
     "string",
     1234_i64,
