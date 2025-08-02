@@ -58,6 +58,12 @@ module Trove
       @env.from({oi0: 0_u64, oi1: 0_u64}) { |o| yield({o[:oi0], o[:oi1]}) }
     end
 
+    def oids
+      r = [] of Trove::Oid
+      oids { |i| r << i }
+      r
+    end
+
     def transaction(&)
       if @intx
         yield self
@@ -245,6 +251,12 @@ module Trove
         break unless {i[:ipv0], i[:ipv1]} == dg
         yield({i[:ii0], i[:ii1]})
       end
+    end
+
+    def where(p : String, v : I)
+      r = [] of Trove::Oid
+      where(p, v) { |i| r << i }
+      r
     end
 
     def unique(p : String, v : I)

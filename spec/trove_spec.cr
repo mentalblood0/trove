@@ -65,25 +65,14 @@ describe Trove do
     chest.has_key?(oid, "nonexistent.key").should eq false
     chest.has_key!(oid, "nonexistent.key").should eq false
 
-    all_oids = [] of Trove::Oid
-    chest.oids { |i| all_oids << i }
-    all_oids.should eq [oid]
+    chest.oids.should eq [oid]
 
     # indexes work for simple values as well as for arrays
 
-    oids = [] of Trove::Oid
-    chest.where("dict.boolean", false) { |i| oids << i }
-    oids.should eq [oid]
-
-    chest.where("dict.boolean", true) { |i| raise "Who is here?" }
-
-    oids = [] of Trove::Oid
-    chest.where("dict.hello.0", "number") { |i| oids << i }
-    oids.should eq [oid]
-
-    oids = [] of Trove::Oid
-    chest.where("dict.hello", "number") { |i| oids << i }
-    oids.should eq [oid]
+    chest.where("dict.boolean", false).should eq [oid]
+    chest.where("dict.boolean", true).should eq [] of Trove::Oid
+    chest.where("dict.hello.0", "number").should eq [oid]
+    chest.where("dict.hello", "number").should eq [oid]
 
     # unique is way faster than where,
     # but works correctly only for values that were always unique
@@ -98,15 +87,15 @@ describe Trove do
     chest.delete! oid, "dict.hello.2"
     chest.get(oid, "dict.hello.2").should eq nil
     chest.get(oid, "dict.hello").should eq ["number", 42, 0.0]
-    chest.where("dict.hello.2", -4.2) { |i| raise "Who is here?" }
-    chest.where("dict.hello", -4.2) { |i| raise "Who is here?" }
+    chest.where("dict.hello.2", -4.2).should eq [] of Trove::Oid
+    chest.where("dict.hello", -4.2).should eq [] of Trove::Oid
 
     chest.delete oid, "dict.hello"
     chest.get(oid, "dict.hello").should eq nil
     chest.get(oid, "dict").should eq({"boolean" => false})
 
     chest.delete! oid, "dict.boolean"
-    chest.where("dict.boolean", false) { |i| raise "Who is here?" }
+    chest.where("dict.boolean", false).should eq [] of Trove::Oid
     chest.get(oid, "dict").should eq nil
     chest.get(oid).should eq({"null" => nil, "array" => [1, ["two", false], [nil]]})
 
@@ -135,19 +124,17 @@ describe Trove do
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
-    chest.oids { raise "Who is here?" }
+    chest.oids.should eq [] of Trove::Oid
 
     chest.set oid, "", parsed
-    all_oids = [] of Trove::Oid
-    chest.oids { |i| all_oids << i }
-    all_oids.should eq [oid]
+    chest.oids.should eq [oid]
 
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
-    chest.where("dict.boolean", false) { |i| raise "Who is here?" }
-    chest.where("dict", false) { |i| raise "Who is here?" }
-    chest.oids { raise "Who is here?" }
+    chest.where("dict.boolean", false).should eq [] of Trove::Oid
+    chest.where("dict", false).should eq [] of Trove::Oid
+    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports dots in keys" do
@@ -185,14 +172,8 @@ describe Trove do
   it "distinguishes in key/value pairs with same concatenaction result" do
     i0 = chest << JSON.parse %({"as": "a"})
     i1 = chest << JSON.parse %({"a": "sa"})
-
-    oids = [] of Trove::Oid
-    chest.where("as", "a") { |oid| oids << oid }
-    oids.should eq [i0]
-
-    oids = [] of Trove::Oid
-    chest.where("a", "sa") { |oid| oids << oid }
-    oids.should eq [i1]
+    chest.where("as", "a").should eq [i0]
+    chest.where("a", "sa").should eq [i1]
   end
 
   [
@@ -228,23 +209,23 @@ describe Trove do
 
       case o
       when String, Int64, Float64, Bool, Nil
-        chest.where("", o) { |ii| ii.should eq i }
+        chest.where("", o).should eq [i]
         chest.has_key!(i).should eq true
       when Array
         o.each_with_index do |v, k|
           chest.has_key!(i, k.to_s).should eq true
-          chest.where(k.to_s, v) { |ii| ii.should eq i }
+          chest.where(k.to_s, v).should eq [i]
         end
       when Hash(String, String)
         o.each do |k, v|
           chest.has_key!(i, k).should eq true
-          chest.where(k.to_s, v) { |ii| ii.should eq i }
+          chest.where(k.to_s, v).should eq [i]
         end
       when COMPLEX_STRUCTURE
         chest.has_key!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq true
         chest.get(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
         chest.get!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
-        chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep") { |ii| break }
+        chest.where("level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep").should eq [i]
       end
 
       chest.delete i
