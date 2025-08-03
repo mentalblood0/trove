@@ -1,8 +1,9 @@
 require "json"
 require "yaml"
 require "uuid"
-require "xxhash128"
+require "compress/gzip"
 
+require "xxhash128"
 require "sophia"
 
 module Trove
@@ -62,6 +63,25 @@ module Trove
       r = [] of Trove::Oid
       oids { |i| r << i }
       r
+    end
+
+    def dump(io : IO)
+      Compress::Gzip::Writer.open(io, Compress::Deflate::BEST_COMPRESSION) do |gzip|
+        oids do |o|
+          gzip.puts({"oid"  => [o[0].to_s, o[1].to_s],
+                     "data" => get(o)}.to_json)
+        end
+      end
+    end
+
+    def load(io : IO)
+      Compress::Gzip::Reader.open(io) do |gzip|
+        gzip.each_line do |l|
+          p = JSON.parse l.chomp
+          o = {p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}
+          set o, "", p["data"]
+        end
+      end
     end
 
     def transaction(&)

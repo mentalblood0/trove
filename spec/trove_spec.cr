@@ -176,6 +176,29 @@ describe Trove do
     chest.where("a", "sa").should eq [i1]
   end
 
+  it "can dump and load data" do
+    o0 = {"a" => "b"}
+    o1 = COMPLEX_STRUCTURE
+    i0 = chest << JSON.parse o0.to_json
+    i1 = chest << JSON.parse o1.to_json
+
+    dump = IO::Memory.new
+    chest.dump dump
+
+    chest.delete i0
+    chest.delete i1
+    chest.get(i0).should eq nil
+    chest.get(i1).should eq nil
+
+    dump.rewind
+    chest.load dump
+
+    chest.get(i0).should eq o0
+    chest.get(i1).should eq o1
+    chest.delete i0
+    chest.delete i1
+  end
+
   [
     "string",
     1234_i64,
