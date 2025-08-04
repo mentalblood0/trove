@@ -161,15 +161,22 @@ module Trove
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
-        ttx.delete i, p
+        ttx.delete i, p unless p.empty? && !ttx.env.has_key?({oi0: i[0], oi1: i[1]})
         ttx.env << {oi0: i[0], oi1: i[1]}
         ttx.set i, p, o.raw
       end
     end
 
+    protected def deletei(i : Oid, p : String)
+      pp = partition p
+      dg = digest pp[:b], (@env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return)
+      @env.delete({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: i[0], ii1: i[1]})
+      @env.delete({upv0: dg[0], upv1: dg[1]})
+    end
+
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
-        ttx.delete! i, p
+        ttx.deletei i, p
         ttx.env << {oi0: i[0], oi1: i[1]}
         ttx.set i, p, o.raw
       end
