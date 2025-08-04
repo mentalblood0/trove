@@ -174,6 +174,8 @@ describe Trove do
     i1 = chest << JSON.parse %({"a": "sa"})
     chest.where("as", "a").should eq [i0]
     chest.where("a", "sa").should eq [i1]
+    chest.delete i0
+    chest.delete i1
   end
 
   it "can dump and load data" do
