@@ -102,8 +102,7 @@ module Trove
       Compress::Gzip::Reader.open(io) do |gzip|
         gzip.each_line do |l|
           p = JSON.parse l.chomp
-          o = {p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}
-          set o, "", p["data"]
+          set({p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}, "", p["data"])
         end
       end
     end

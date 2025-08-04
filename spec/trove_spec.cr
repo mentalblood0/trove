@@ -179,6 +179,9 @@ describe Trove do
   end
 
   it "can dump and load data" do
+    # dump is gzip compressed json lines of format
+    # {"oid": <object identifier>, "data": <object>}
+
     o0 = {"a" => "b"}
     o1 = COMPLEX_STRUCTURE
     i0 = chest << JSON.parse o0.to_json
