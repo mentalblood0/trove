@@ -174,9 +174,14 @@ describe Trove do
     i1 = chest << JSON.parse %({"a": "sa"})
     chest.where("as", "a").should eq [i0]
     chest.where("a", "sa").should eq [i1]
+    chest.delete i0
+    chest.delete i1
   end
 
   it "can dump and load data" do
+    # dump is gzip compressed json lines of format
+    # {"oid": <object identifier>, "data": <object>}
+
     o0 = {"a" => "b"}
     o1 = COMPLEX_STRUCTURE
     i0 = chest << JSON.parse o0.to_json

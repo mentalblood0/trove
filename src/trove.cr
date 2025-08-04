@@ -65,11 +65,35 @@ module Trove
       r
     end
 
+    macro mwo
+      o = if flat.size == 0
+            nil
+          elsif flat.has_key? ""
+            flat[""]
+          else
+            h2a A.new nest flat
+          end
+      gzip.puts({"oid"  => [oid[0].to_s, oid[1].to_s],
+                 "data" => o}.to_json)
+    end
+
     def dump(io : IO)
       Compress::Gzip::Writer.open(io, Compress::Deflate::BEST_COMPRESSION) do |gzip|
-        oids do |o|
-          gzip.puts({"oid"  => [o[0].to_s, o[1].to_s],
-                     "data" => get(o)}.to_json)
+        oid : Oid? = nil
+        flat = H.new
+        @env.from({di0: 0_u64, di1: 0_u64, dp: ""}) do |d|
+          i = {d[:di0], d[:di1]}
+          unless i == oid
+            if oid
+              mwo
+              flat.clear
+            end
+            oid = i
+          end
+          flat[d[:dp]] = A.new decode d[:dv]
+        end
+        if oid
+          mwo
         end
       end
     end
@@ -78,8 +102,7 @@ module Trove
       Compress::Gzip::Reader.open(io) do |gzip|
         gzip.each_line do |l|
           p = JSON.parse l.chomp
-          o = {p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}
-          set o, "", p["data"]
+          set({p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}, "", p["data"])
         end
       end
     end
