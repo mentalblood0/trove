@@ -73,7 +73,9 @@ module Trove
           else
             h2a A.new nest flat
           end
-      gzip.puts({"oid"  => [oid[0].to_s, oid[1].to_s],
+      oid0 = oid[0]
+      oid1 = oid[1]
+      gzip.puts({"oid"  => pointerof(oid0).as(UInt8*).to_slice(8).hexstring + pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
                  "data" => o}.to_json)
     end
 
@@ -102,7 +104,8 @@ module Trove
       Compress::Gzip::Reader.open(io) do |gzip|
         gzip.each_line do |l|
           p = JSON.parse l.chomp
-          set({p["oid"][0].as_s.to_u64, p["oid"][1].as_s.to_u64}, "", p["data"])
+          oid = p["oid"].as_s.hexbytes
+          set(oid.to_unsafe.as(Oid*).value, "", p["data"])
         end
       end
     end
