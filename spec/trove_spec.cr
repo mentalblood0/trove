@@ -12,8 +12,6 @@ describe Trove do
       db:
         d: &ddbs
           compression: zstd
-          compaction:
-            cache: 2_000_000_000
         i:
           *ddbs
         u:

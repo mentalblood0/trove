@@ -15,7 +15,7 @@ module Trove
   Sophia.define_env Env, {d: {key: {di0: UInt64,     # data: oid first 64bits
                                     di1: UInt64,     #       oid last 64bits
                                     dp: String},     #       path
-                              value: {dv: String}},  #       value
+                              value: {dv: Bytes}},   #       value
                           i: {key: {ipv0: UInt64,    # index: path and value digest first 64bits
                                     ipv1: UInt64,    #        path and value digest last 64bit
                                     ipi: UInt32,     #        path array index
@@ -51,8 +51,11 @@ module Trove
       {d.high64, d.low64}
     end
 
-    protected def digest(pb : String, ve : String)
-      digest [pb, ve].to_json.to_slice
+    protected def digest(pb : String, ve : Bytes)
+      ds = Bytes.new pb.size + 1 + ve.size
+      pb.to_unsafe.copy_to ds.to_unsafe, pb.bytesize
+      ve.copy_to ds.to_unsafe + pb.size + 1, ve.size
+      digest ds
     end
 
     def oids(&)
@@ -124,38 +127,66 @@ module Trove
 
     alias I = String | Int64 | Float64 | Bool | Nil
 
-    protected def encode(v : I) : String
+    protected def encode(v : I) : Bytes
       case v
       when String
-        "s#{v}"
+        r = Bytes.new 1 + v.bytesize
+        r[0] = {{'s'.ord}}.to_u8!
+        v.to_unsafe.copy_to r.to_unsafe + 1, v.bytesize
+        r
       when Int64
-        "i#{v}"
+        if v >= Int8::MIN && v <= Int8::MAX
+          r = Bytes.new 1 + 1
+          r[0] = {{'1'.ord}}.to_u8!
+          r[1] = v.to_i8!.to_u8
+          r
+        elsif v >= Int16::MIN && v <= Int16::MAX
+          r = Bytes.new 1 + 2
+          r[0] = {{'2'.ord}}.to_u8!
+          IO::ByteFormat::LittleEndian.encode v.to_i16!, r[1..]
+          r
+        elsif v >= Int32::MIN && v <= Int32::MAX
+          r = Bytes.new 1 + 4
+          r[0] = {{'4'.ord}}.to_u8!
+          IO::ByteFormat::LittleEndian.encode v.to_i32!, r[1..]
+          r
+        else
+          r = Bytes.new 1 + 8
+          r[0] = {{'8'.ord}}.to_u8!
+          IO::ByteFormat::LittleEndian.encode v, r[1..]
+          r
+        end
       when Float64
-        "f#{v}"
-      when true
-        "T"
-      when false
-        "F"
-      when nil
-        ""
-      else
-        raise "Can not encode #{v}"
+        if v.finite? && v == (vf32 = v.to_f32).to_f64
+          r = Bytes.new 1 + 4
+          r[0] = {{'3'.ord}}.to_u8!
+          IO::ByteFormat::LittleEndian.encode vf32.not_nil!, r[1..]
+          r
+        else
+          r = Bytes.new 1 + 8
+          r[0] = {{'5'.ord}}.to_u8!
+          IO::ByteFormat::LittleEndian.encode v, r[1..]
+          r
+        end
+      when true  then Bytes.new 1, {{'T'.ord}}.to_u8!
+      when false then Bytes.new 1, {{'F'.ord}}.to_u8!
+      when nil   then "".to_slice
+      else            raise "Can not encode #{v}"
       end
     end
 
-    protected def decode(s : String) : I
-      return nil if s.empty?
-      case s[0]
-      when 's'
-        s[1..]
-      when 'i'
-        s[1..].to_i64
-      when 'f'
-        s[1..].to_f
-      when 'T'
-        true
-      when 'F'
-        false
+    protected def decode(b : Bytes) : I
+      return nil if b.empty?
+      case b[0]
+      when {{'s'.ord}} then String.new b[1..]
+      when {{'1'.ord}} then IO::ByteFormat::LittleEndian.decode(Int8, b[1..]).to_i64!
+      when {{'2'.ord}} then IO::ByteFormat::LittleEndian.decode(Int16, b[1..]).to_i64!
+      when {{'4'.ord}} then IO::ByteFormat::LittleEndian.decode(Int32, b[1..]).to_i64!
+      when {{'8'.ord}} then IO::ByteFormat::LittleEndian.decode(Int64, b[1..])
+      when {{'3'.ord}} then IO::ByteFormat::LittleEndian.decode(Float32, b[1..]).to_f64!
+      when {{'5'.ord}} then IO::ByteFormat::LittleEndian.decode(Float64, b[1..])
+      when {{'T'.ord}} then true
+      when {{'F'.ord}} then false
       end
     end
 
@@ -271,7 +302,7 @@ module Trove
       decode @env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
-    protected def delete(i : Oid, p : String, ve : String)
+    protected def delete(i : Oid, p : String, ve : Bytes)
       transaction do |ttx|
         ttx.env.delete({di0: i[0], di1: i[1], dp: p})
         pp = partition p
