@@ -218,8 +218,11 @@ module Trove
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
-        ttx.delete i, p unless p.empty? && !ttx.env.has_key?({oi0: i[0], oi1: i[1]})
-        ttx.env << {oi0: i[0], oi1: i[1]}
+        if ttx.env.has_key?({oi0: i[0], oi1: i[1]})
+          ttx.delete i, p unless p.empty?
+        else
+          ttx.env << {oi0: i[0], oi1: i[1]}
+        end
         ttx.set i, p, o.raw
       end
     end
