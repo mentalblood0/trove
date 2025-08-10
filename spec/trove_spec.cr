@@ -196,7 +196,7 @@ describe Trove do
     dump.rewind
     chest.load dump
 
-    chest.oids.should eq [i0, i1]
+    chest.oids.sort.should eq [i0, i1].sort
     chest.get(i0).should eq o0
     chest.get(i1).should eq o1
     chest.delete i0

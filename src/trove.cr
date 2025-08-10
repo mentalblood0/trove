@@ -40,7 +40,7 @@ module Trove
     def initialize(@env : Env)
     end
 
-    protected def oid : Oid
+    protected def new_oid : Oid
       b = UUID.v7.bytes.to_slice
       {IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
        IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
@@ -78,7 +78,8 @@ module Trove
           end
       oid0 = oid[0]
       oid1 = oid[1]
-      gzip.puts({"oid"  => pointerof(oid0).as(UInt8*).to_slice(8).hexstring + pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
+      gzip.puts({"oid" => pointerof(oid0).as(UInt8*).to_slice(8).hexstring +
+                          pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
                  "data" => o}.to_json)
     end
 
@@ -243,16 +244,15 @@ module Trove
     end
 
     def <<(o : A)
-      i = oid
+      i = new_oid
       set i, "", o
       i
     end
 
     protected def h2a(a : A) : A
       if ah = a.as_h?
-        if ah.keys.all? { |k| k.to_u64 rescue nil }
-          vs = ah.values
-          return A.new AA.new(ah.size) { |i| h2a vs[i] }
+        if ah.keys.all? { |k| k.to_u32? }
+          return A.new ah.values.map { |e| h2a e }
         else
           ah.each { |k, v| ah[k] = h2a v }
         end
