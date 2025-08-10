@@ -139,7 +139,7 @@ module Trove
         if v >= Int8::MIN && v <= Int8::MAX
           r = Bytes.new 1 + 1
           r[0] = {{'1'.ord}}.to_u8!
-          r[1] = v.to_i8!.to_u8
+          IO::ByteFormat::LittleEndian.encode v.to_i8!, r[1..]
           r
         elsif v >= Int16::MIN && v <= Int16::MAX
           r = Bytes.new 1 + 2
