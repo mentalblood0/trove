@@ -252,7 +252,7 @@ module Trove
     protected def h2a(a : A) : A
       if ah = a.as_h?
         if ah.keys.all? { |k| k.to_u32? }
-          return A.new ah.values.map { |e| h2a e }
+          return A.new ah.keys.sort_by { |s| s.to_u32 }.map { |k| h2a ah[k] }
         else
           ah.each { |k, v| ah[k] = h2a v }
         end

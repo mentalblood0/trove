@@ -203,6 +203,13 @@ describe Trove do
     chest.delete i1
   end
 
+  it "correctly gets arrays with >9 elements" do
+    o = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    i = chest << JSON.parse o.to_json
+    chest.get(i).should eq o
+    chest.delete i
+  end
+
   [
     "string",
     1234_i64,
