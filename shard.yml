@@ -9,6 +9,8 @@ dependencies:
     github: mentalblood0/sophia
   xxhash128:
     github: mentalblood0/xxhash128
+  shoco:
+    github: mentalblood0/shoco
 
 crystal: '>= 1.16.3'
 
