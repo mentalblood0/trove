@@ -140,7 +140,7 @@ module Trove
           r[0] = {{'x'.ord}}.to_u8!
           xm.to_unsafe.copy_to r.to_unsafe + 1, xm.size
           r
-        elsif (!xm && xo) || (xm && xo && xo.size < xm.size)
+        elsif (!xm && xo) || (xm && xo && xo.size <= xm.size)
           r = Bytes.new 1 + xo.size
           r[0] = {{'X'.ord}}.to_u8!
           xo.to_unsafe.copy_to r.to_unsafe + 1, xo.size
