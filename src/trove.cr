@@ -135,12 +135,12 @@ module Trove
       when String
         xm = Smaz::Api.compress v
         xo = Shoco::Api.compress v
-        if (xm && !xo) || (xm && xo && xm.size < xo.size)
+        if ((xm && !xo) || (xm && xo && xm.size < xo.size)) && (xm.size < v.size)
           r = Bytes.new 1 + xm.size
           r[0] = {{'x'.ord}}.to_u8!
           xm.to_unsafe.copy_to r.to_unsafe + 1, xm.size
           r
-        elsif (!xm && xo) || (xm && xo && xo.size <= xm.size)
+        elsif ((!xm && xo) || (xm && xo && xo.size < xm.size)) && (xo.size < v.size)
           r = Bytes.new 1 + xo.size
           r[0] = {{'X'.ord}}.to_u8!
           xo.to_unsafe.copy_to r.to_unsafe + 1, xo.size
