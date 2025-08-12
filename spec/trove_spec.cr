@@ -4,21 +4,7 @@ require "../src/trove"
 require "./common.cr"
 
 describe Trove do
-  chest = Trove::Chest.from_yaml <<-YAML
-  env:
-    opts:
-      sophia:
-        path: /tmp/trove
-      db:
-        d: &ddbs
-          compression: zstd
-        i:
-          *ddbs
-        u:
-          *ddbs
-        o:
-          *ddbs
-  YAML
+  chest = Trove::Chest.from_yaml File.read "spec/config.yml"
 
   it "example" do
     parsed = JSON.parse %({

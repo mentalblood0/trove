@@ -1,0 +1,14 @@
+env:
+  opts:
+    sophia:
+      path: /tmp/trove
+    db:
+      d: &ddbs
+        compression: zstd
+      i:
+        *ddbs
+      u:
+        *ddbs
+      o:
+        *ddbs
+

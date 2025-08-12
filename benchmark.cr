@@ -3,23 +3,7 @@ require "benchmark"
 require "./src/trove.cr"
 require "./spec/common.cr"
 
-chest = Trove::Chest.from_yaml <<-YAML
-env:
-  opts:
-    sophia:
-      path: /tmp/trove
-    db:
-      d: &ddbs
-        compression: zstd
-        compaction:
-          cache: 2_000_000_000
-      i:
-        *ddbs
-      u:
-        *ddbs
-      o:
-        *ddbs
-YAML
+chest = Trove::Chest.from_yaml File.read "spec/config.yml"
 
 cs = JSON.parse COMPLEX_STRUCTURE.to_json
 k = "level1.level2.level3.1.metadata.level4.level5.level6.note"
