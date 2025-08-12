@@ -5,6 +5,7 @@ require "compress/gzip"
 
 require "xxhash128"
 require "sophia"
+require "shoco"
 require "smaz"
 
 module Trove
@@ -132,10 +133,17 @@ module Trove
     protected def encode(v : I) : Bytes
       case v
       when String
-        if x = Smaz::Api.compress v
-          r = Bytes.new 1 + x.size
+        xm = Smaz::Api.compress v
+        xo = Shoco::Api.compress v
+        if (xm && !xo) || (xm && xo && xm.size < xo.size)
+          r = Bytes.new 1 + xm.size
           r[0] = {{'x'.ord}}.to_u8!
-          x.to_unsafe.copy_to r.to_unsafe + 1, x.size
+          xm.to_unsafe.copy_to r.to_unsafe + 1, xm.size
+          r
+        elsif (!xm && xo) || (xm && xo && xo.size < xm.size)
+          r = Bytes.new 1 + xo.size
+          r[0] = {{'X'.ord}}.to_u8!
+          xo.to_unsafe.copy_to r.to_unsafe + 1, xo.size
           r
         else
           r = Bytes.new 1 + v.bytesize
@@ -188,6 +196,7 @@ module Trove
       return nil if b.empty?
       case b[0]
       when {{'x'.ord}} then Smaz::Api.decompress b[1..]
+      when {{'X'.ord}} then Shoco::Api.decompress b[1..]
       when {{'s'.ord}} then String.new b[1..]
       when {{'1'.ord}} then IO::ByteFormat::LittleEndian.decode(Int8, b[1..]).to_i64!
       when {{'2'.ord}} then IO::ByteFormat::LittleEndian.decode(Int16, b[1..]).to_i64!
