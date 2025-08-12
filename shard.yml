@@ -11,6 +11,8 @@ dependencies:
     github: mentalblood0/xxhash128
   smaz:
     github: mentalblood0/smaz
+  shoco:
+    github: mentalblood0/shoco
 
 crystal: '>= 1.16.3'
 
