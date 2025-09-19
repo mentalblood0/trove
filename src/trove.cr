@@ -68,38 +68,49 @@ module Trove
       r
     end
 
-    macro mwo
-      o = if flat.size == 0
-            nil
-          elsif flat.has_key? ""
-            flat[""]
-          else
-            h2a A.new nest flat
+    macro myo
+      if flat.size == 0
+        yield({oid, A.new nil})
+      elsif flat.has_key? ""
+        yield({oid, flat[""]})
+      else
+        yield({oid, h2a A.new nest flat})
+      end
+    end
+
+    def objects(&)
+      oid : Oid? = nil
+      flat = H.new
+      @env.from({di0: 0_u64, di1: 0_u64, dp: ""}) do |d|
+        i = {d[:di0], d[:di1]}
+        unless i == oid
+          if oid
+            myo
+            flat.clear
           end
-      oid0 = oid[0]
-      oid1 = oid[1]
-      gzip.puts({"oid" => pointerof(oid0).as(UInt8*).to_slice(8).hexstring +
-                          pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
-                 "data" => o}.to_json)
+          oid = i
+        end
+        flat[d[:dp]] = A.new decode d[:dv]
+      end
+      if oid
+        myo
+      end
+    end
+
+    def objects
+      r = [] of {Oid, A}
+      objects { |o| r << o }
+      r
     end
 
     def dump(io : IO)
       Compress::Gzip::Writer.open(io, Compress::Deflate::BEST_COMPRESSION) do |gzip|
-        oid : Oid? = nil
-        flat = H.new
-        @env.from({di0: 0_u64, di1: 0_u64, dp: ""}) do |d|
-          i = {d[:di0], d[:di1]}
-          unless i == oid
-            if oid
-              mwo
-              flat.clear
-            end
-            oid = i
-          end
-          flat[d[:dp]] = A.new decode d[:dv]
-        end
-        if oid
-          mwo
+        objects do |oid, o|
+          oid0 = oid[0]
+          oid1 = oid[1]
+          gzip.puts({"oid" => pointerof(oid0).as(UInt8*).to_slice(8).hexstring +
+                              pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
+                     "data" => o}.to_json)
         end
       end
     end

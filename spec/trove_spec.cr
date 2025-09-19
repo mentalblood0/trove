@@ -50,6 +50,7 @@ describe Trove do
     chest.has_key!(oid, "nonexistent.key").should eq false
 
     chest.oids.should eq [oid]
+    chest.objects.should eq [{oid, parsed}]
 
     # indexes work for simple values as well as for arrays
 
@@ -183,6 +184,7 @@ describe Trove do
     chest.load dump
 
     chest.oids.sort.should eq [i0, i1].sort
+    (Set.new chest.objects).should eq Set.new [{i0, o0}, {i1, o1}]
     chest.get(i0).should eq o0
     chest.get(i1).should eq o1
     chest.delete i0
