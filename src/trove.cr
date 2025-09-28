@@ -4,10 +4,10 @@ require "uuid"
 require "compress/gzip"
 
 require "xxhash128"
+require "dream"
 require "sophia"
 
 module Trove
-  alias Oid = {UInt64, UInt64}
   alias A = JSON::Any
   alias H = Hash(String, A)
   alias AA = Array(A)
@@ -16,34 +16,57 @@ module Trove
                                     di1: UInt64,     #       oid last 64bits
                                     dp: String},     #       path
                               value: {dv: Bytes}},   #       value
-                          i: {key: {ipv0: UInt64,    # index: path and value digest first 64bits
-                                    ipv1: UInt64,    #        path and value digest last 64bit
-                                    ipi: UInt32,     #        path array index
-                                    ii0: UInt64,     #        oid first 64bits
-                                    ii1: UInt64}},   #        oid last 64bits
                           u: {key: {upv0: UInt64,    # unique: path and value digest first 64bits
                                     upv1: UInt64},   #         path and value digest last 64bits
                               value: {ui0: UInt64,   #         oid first 64bits
-                                      ui1: UInt64}}, #         oid last 64bits
-                          o: {key: {oi0: UInt64,     # oids: first 64bits
-                                    oi1: UInt64}}}   #       last 64bits
+                                      ui1: UInt64}}} #         oid last 64bits
+
+  struct Oid
+    getter value : {UInt64, UInt64}
+
+    def initialize(@value)
+    end
+
+    def self.random
+      from_bytes UUID.v7.bytes.to_slice
+    end
+
+    def self.from_bytes(b : Bytes)
+      Oid.new({IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
+               IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])})
+    end
+
+    def self.from_string(s : String)
+      from_bytes s.hexbytes
+    end
+
+    def <=>(other : Oid)
+      @value <=> other.value
+    end
+
+    def to_bytes
+      r = Bytes.new 16
+      IO::ByteFormat::BigEndian.encode value[0], r[0..7]
+      IO::ByteFormat::BigEndian.encode value[1], r[8..15]
+      r
+    end
+
+    def to_string
+      to_bytes.hexstring
+    end
+  end
 
   class Chest
     include YAML::Serializable
     include YAML::Serializable::Strict
 
     getter env : Env
+    getter index : Dream::Index
 
     @[YAML::Field(ignore: true)]
     property intx = false
 
-    def initialize(@env : Env)
-    end
-
-    protected def new_oid : Oid
-      b = UUID.v7.bytes.to_slice
-      {IO::ByteFormat::BigEndian.decode(UInt64, b[0..7]),
-       IO::ByteFormat::BigEndian.decode(UInt64, b[8..15])}
+    def initialize(@env, @index)
     end
 
     protected def digest(s : Bytes)
@@ -59,11 +82,11 @@ module Trove
     end
 
     def oids(&)
-      @env.from({oi0: 0_u64, oi1: 0_u64}) { |o| yield({o[:oi0], o[:oi1]}) }
+      @index.objects { |o| yield Oid.from_bytes o }
     end
 
     def oids
-      r = [] of Trove::Oid
+      r = [] of Oid
       oids { |i| r << i }
       r
     end
@@ -82,7 +105,7 @@ module Trove
       oid : Oid? = nil
       flat = H.new
       @env.from({di0: 0_u64, di1: 0_u64, dp: ""}) do |d|
-        i = {d[:di0], d[:di1]}
+        i = Oid.new({d[:di0], d[:di1]})
         unless i == oid
           if oid
             myo
@@ -106,10 +129,9 @@ module Trove
     def dump(io : IO)
       Compress::Gzip::Writer.open(io, Compress::Deflate::BEST_COMPRESSION) do |gzip|
         objects do |oid, o|
-          oid0 = oid[0]
-          oid1 = oid[1]
-          gzip.puts({"oid" => pointerof(oid0).as(UInt8*).to_slice(8).hexstring +
-                              pointerof(oid1).as(UInt8*).to_slice(8).hexstring,
+          oid0 = oid.value[0]
+          oid1 = oid.value[1]
+          gzip.puts({"oid"  => oid.to_string,
                      "data" => o}.to_json)
         end
       end
@@ -119,8 +141,8 @@ module Trove
       Compress::Gzip::Reader.open(io) do |gzip|
         gzip.each_line do |l|
           p = JSON.parse l.chomp
-          oid = p["oid"].as_s.hexbytes
-          set(oid.to_unsafe.as(Oid*).value, "", p["data"])
+          oid = Oid.from_string p["oid"].as_s
+          set oid, "", p["data"]
         end
       end
     end
@@ -130,7 +152,7 @@ module Trove
         yield self
       else
         @env.transaction do |tx|
-          r = Chest.new tx
+          r = Chest.new tx, @index
           r.intx = true
           yield r
         end
@@ -221,19 +243,17 @@ module Trove
       else
         oe = encode o
       end
-      @env << {di0: i[0], di1: i[1], dp: p, dv: oe}
+      @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
       pp = partition p
       d = digest pp[:b], oe
-      @env << {ipv0: d[0], ipv1: d[1], ipi: pp[:i], ii0: i[0], ii1: i[1]}
-      @env << {upv0: d[0], upv1: d[1], ui0: i[0], ui1: i[1]}
+      @index.add i.to_bytes, [(Oid.new d).to_string]
+      @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
     end
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
-        if ttx.env.has_key?({oi0: i[0], oi1: i[1]})
+        if @index.has_object? i.to_bytes
           ttx.delete i, p unless p.empty?
-        else
-          ttx.env << {oi0: i[0], oi1: i[1]}
         end
         ttx.set i, p, o.raw
       end
@@ -241,21 +261,20 @@ module Trove
 
     protected def deletei(i : Oid, p : String)
       pp = partition p
-      dg = digest pp[:b], (@env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return)
-      @env.delete({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: i[0], ii1: i[1]})
+      dg = digest pp[:b], (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
+      @index.delete i.to_bytes, [(Oid.new dg).to_string]
       @env.delete({upv0: dg[0], upv1: dg[1]})
     end
 
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
         ttx.deletei i, p
-        ttx.env << {oi0: i[0], oi1: i[1]}
         ttx.set i, p, o.raw
       end
     end
 
     def <<(o : A)
-      i = new_oid
+      i = Oid.random
       set i, "", o
       i
     end
@@ -291,20 +310,20 @@ module Trove
     end
 
     def has_key?(i : Oid, p : String = "")
-      @env.from({di0: i[0], di1: i[1], dp: p}) do |d|
-        return d[:di0] == i[0] && d[:di1] == i[1] && d[:dp].starts_with? p
+      @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
+        return d[:di0] == i.value[0] && d[:di1] == i.value[1] && d[:dp].starts_with? p
       end
       false
     end
 
     def has_key!(i : Oid, p : String = "")
-      @env.has_key?({di0: i[0], di1: i[1], dp: p})
+      @env.has_key?({di0: i.value[0], di1: i.value[1], dp: p})
     end
 
     def get(i : Oid, p : String = "")
       flat = H.new
-      @env.from({di0: i[0], di1: i[1], dp: p}) do |d|
-        break unless {d[:di0], d[:di1]} == i && d[:dp].starts_with? p
+      @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
+        break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
         flat[d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
       end
       return nil if flat.size == 0
@@ -313,24 +332,23 @@ module Trove
     end
 
     def get!(i : Oid, p : String)
-      decode @env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue nil
+      decode @env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
     protected def delete(i : Oid, p : String, ve : Bytes)
       transaction do |ttx|
-        ttx.env.delete({di0: i[0], di1: i[1], dp: p})
+        ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
         pp = partition p
         dg = digest pp[:b], ve
-        ttx.env.delete({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: i[0], ii1: i[1]})
+        @index.delete i.to_bytes, [(Oid.new dg).to_string]
         ttx.env.delete({upv0: dg[0], upv1: dg[1]})
       end
     end
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
-        ttx.env.delete({oi0: i[0], oi1: i[1]}) if p.empty?
-        ttx.env.from({di0: i[0], di1: i[1], dp: p}) do |d|
-          break unless {d[:di0], d[:di1]} == i && d[:dp].starts_with? p
+        ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
+          break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
           delete i, d[:dp], d[:dv]
         end
       end
@@ -338,21 +356,18 @@ module Trove
 
     def delete!(i : Oid, p : String = "")
       transaction do |ttx|
-        delete i, p, (ttx.env[{di0: i[0], di1: i[1], dp: p}]?.not_nil![:dv] rescue return)
+        delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
       end
     end
 
     def where(p : String, v : I, &)
       pp = partition p
       dg = digest pp[:b], encode v
-      @env.from({ipv0: dg[0], ipv1: dg[1], ipi: pp[:i], ii0: 0_u64, ii1: 0_u64}) do |i|
-        break unless {i[:ipv0], i[:ipv1]} == dg
-        yield({i[:ii0], i[:ii1]})
-      end
+      @index.find [(Oid.new dg).to_string] { |o| yield Oid.from_bytes o }
     end
 
     def where(p : String, v : I)
-      r = [] of Trove::Oid
+      r = [] of Oid
       where(p, v) { |i| r << i }
       r
     end
@@ -361,7 +376,7 @@ module Trove
       dg = digest p, encode v
       u = @env[{upv0: dg[0], upv1: dg[1]}]?
       return nil unless u
-      {u[:ui0], u[:ui1]}
+      Oid.new({u[:ui0], u[:ui1]})
     end
   end
 end

@@ -9,6 +9,8 @@ dependencies:
     github: mentalblood0/sophia
   xxhash128:
     github: mentalblood0/xxhash128
+  dream:
+    github: mentalblood0/dream
 
 crystal: '>= 1.16.3'
 

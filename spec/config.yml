@@ -1,14 +1,27 @@
 env:
   opts:
     sophia:
-      path: /tmp/trove
+      path: /tmp/trove/data
     db:
       d: &ddbs
         compression: zstd
-      i:
-        *ddbs
       u:
         *ddbs
-      o:
-        *ddbs
-
+index:
+  env:
+    opts:
+      sophia:
+        path: /tmp/trove/index
+      db:
+        t2o: &ddbs
+          compression: zstd
+        o2t:
+          *ddbs
+        i2t:
+          *ddbs
+        t2i:
+          *ddbs
+        i2o:
+          *ddbs
+        o2i:
+          *ddbs
