@@ -140,7 +140,18 @@ describe Trove do
   end
 
   it "supports indexing large values" do
-    chest.env.getint("db.i.limit.key").not_nil!.should eq UInt64::MAX
+    l = chest.index.env.getint("db.t2i.limit.key").not_nil!
+    (l - 32).upto (l + 32) do |size|
+      v = ["a" * size]
+      j = v.to_json
+      p = JSON.parse j
+      i = chest << p
+      oids = [] of Trove::Oid
+      chest.where("0", v.first) { |oid| oids << oid }
+      oids.should eq [i]
+      chest.get(i).should eq v
+      chest.delete i
+    end
   end
 
   it "distinguishes in key/value pairs with same concatenaction result" do
