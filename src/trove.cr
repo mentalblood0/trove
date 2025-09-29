@@ -224,7 +224,7 @@ module Trove
       end
     end
 
-    protected def set(i : Oid, p : String, o : A::Type, ds : Array({UInt64, UInt64})? = nil)
+    protected def set(i : Oid, p : String, o : A::Type, ds : Array(String)? = nil)
       case o
       when H
         o.each do |k, v|
@@ -240,7 +240,11 @@ module Trove
       end
       @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
       d = digest p, oe
-      ds << d if ds
+      if ds
+        ds << (Oid.new d).to_string if ds
+      else
+        @index.add i.to_bytes, [(Oid.new d).to_string]
+      end
       @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
     end
 
@@ -249,10 +253,10 @@ module Trove
         if @index.has_object? i.to_bytes
           ttx.delete i, p unless p.empty?
         end
-        ds = [] of {UInt64, UInt64}
+        ds = [] of String
         ttx.set i, p, o.raw, ds
         ib = i.to_bytes
-        @index.add ib, ds.map { |d| (Oid.new d).to_string }
+        @index.add ib, ds
       end
     end
 
@@ -264,7 +268,7 @@ module Trove
 
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
-        ttx.deletei i, p
+        deletei i, p
         ttx.set i, p, o.raw
       end
     end
@@ -331,21 +335,27 @@ module Trove
       decode @env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
-    protected def delete(i : Oid, p : String, ve : Bytes)
+    protected def delete(i : Oid, p : String, ve : Bytes, dgs : Array(String)? = nil)
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
         dg = digest p, ve
-        @index.delete i.to_bytes, [(Oid.new dg).to_string]
+        if dgs
+          dgs << (Oid.new dg).to_string
+        else
+          @index.delete i.to_bytes, [(Oid.new dg).to_string]
+        end
         ttx.env.delete({upv0: dg[0], upv1: dg[1]})
       end
     end
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
+        dgs = [] of String
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
           break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-          delete i, d[:dp], d[:dv]
+          delete i, d[:dp], d[:dv], dgs
         end
+        @index.delete i.to_bytes, dgs
       end
     end
 

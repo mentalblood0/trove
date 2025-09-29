@@ -135,6 +135,7 @@ describe Trove do
     i = chest << p
     chest.get(i).should eq p
     chest.delete i
+    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports removing first array element" do
@@ -145,6 +146,7 @@ describe Trove do
     chest.set! i, "k", JSON.parse %("a")
     chest.get(i).should eq({"k" => "a", "1" => "b", "2" => "c"})
     chest.delete i
+    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports indexing large values" do
@@ -159,16 +161,20 @@ describe Trove do
       oids.should eq [i]
       chest.get(i).should eq v
       chest.delete i
+      chest.oids.should eq [] of Trove::Oid
     end
   end
 
-  it "distinguishes in key/value pairs with same concatenaction result" do
+  it "distinguishes in key/value pairs with same concatenation result" do
     i0 = chest << JSON.parse %({"as": "a"})
     i1 = chest << JSON.parse %({"a": "sa"})
     chest.where({"as" => "a"}).should eq [i0]
     chest.where({"a" => "sa"}).should eq [i1]
+    chest.oids.sort.should eq [i0, i1].sort
     chest.delete i0
+    chest.oids.should eq [i1]
     chest.delete i1
+    chest.oids.should eq [] of Trove::Oid
   end
 
   it "can dump and load data" do
@@ -197,6 +203,7 @@ describe Trove do
     chest.get(i1).should eq o1
     chest.delete i0
     chest.delete i1
+    chest.oids.should eq [] of Trove::Oid
   end
 
   it "correctly gets arrays with >9 elements" do
@@ -204,6 +211,7 @@ describe Trove do
     i = chest << JSON.parse o.to_json
     chest.get(i).should eq o
     chest.delete i
+    chest.oids.should eq [] of Trove::Oid
   end
 
   [
