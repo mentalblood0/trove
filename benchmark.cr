@@ -41,11 +41,11 @@ Benchmark.ips do |b|
     chest.unique k, v
   end
   b.report "get one oid from index" do
-    chest.where(k, v) { |ii| break }
+    chest.where({k => v}) { |ii| break }
   end
   b.report "get #{n + 1} oids from index" do
     g = 0
-    chest.where(k, v) { |ii| g += 1 }
+    chest.where({k => v}) { |ii| g += 1 }
     raise "#{g} != #{n + 1}" if g != n + 1
   end
 end
