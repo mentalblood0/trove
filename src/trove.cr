@@ -224,11 +224,6 @@ module Trove
       end
     end
 
-    protected def partition(p : String)
-      pp = p.rpartition '.'
-      {b: pp[0], i: pp[2].to_u32} rescue {b: p, i: 0_u32}
-    end
-
     protected def set(i : Oid, p : String, o : A::Type)
       case o
       when H
@@ -244,8 +239,7 @@ module Trove
         oe = encode o
       end
       @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
-      pp = partition p
-      d = digest pp[:b], oe
+      d = digest p, oe
       @index.add i.to_bytes, [(Oid.new d).to_string]
       @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
     end
@@ -260,8 +254,7 @@ module Trove
     end
 
     protected def deletei(i : Oid, p : String)
-      pp = partition p
-      dg = digest pp[:b], (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
+      dg = digest p, (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
       @index.delete i.to_bytes, [(Oid.new dg).to_string]
       @env.delete({upv0: dg[0], upv1: dg[1]})
     end
@@ -338,8 +331,7 @@ module Trove
     protected def delete(i : Oid, p : String, ve : Bytes)
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
-        pp = partition p
-        dg = digest pp[:b], ve
+        dg = digest p, ve
         @index.delete i.to_bytes, [(Oid.new dg).to_string]
         ttx.env.delete({upv0: dg[0], upv1: dg[1]})
       end
@@ -361,9 +353,7 @@ module Trove
     end
 
     def where(p : String, v : I, &)
-      pp = partition p
-      dg = digest pp[:b], encode v
-      @index.find [(Oid.new dg).to_string] { |o| yield Oid.from_bytes o }
+      @index.find [(Oid.new digest p, encode v).to_string] { |o| yield Oid.from_bytes o }
     end
 
     def where(p : String, v : I)

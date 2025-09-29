@@ -52,19 +52,20 @@ describe Trove do
     chest.oids.should eq [oid]
     chest.objects.should eq [{oid, parsed}]
 
-    # indexes work for simple values as well as for arrays
+    # indexes work only for simple values
 
     chest.where("dict.boolean", false).should eq [oid]
     chest.where("dict.boolean", true).should eq [] of Trove::Oid
     chest.where("dict.hello.0", "number").should eq [oid]
-    chest.where("dict.hello", "number").should eq [oid]
+    chest.where("dict.hello", "number").should eq [] of Trove::Oid
 
     # unique is way faster than where,
     # but works correctly only for values that were always unique
 
     chest.unique("dict.boolean", false).should eq oid
-    chest.unique("dict.hello", "number").should eq oid
-    chest.unique("dict.hello", 42_i64).should eq oid
+    chest.unique("dict.hello.0", "number").should eq oid
+    chest.unique("dict.hello", "number").should eq nil
+    chest.unique("dict.hello.1", 42_i64).should eq oid
 
     chest.delete! oid, "dict.hello"
     chest.get(oid, "dict.hello").should eq ["number", 42, -4.2, 0.0]
