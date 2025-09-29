@@ -224,23 +224,23 @@ module Trove
       end
     end
 
-    protected def set(i : Oid, p : String, o : A::Type)
+    protected def set(i : Oid, p : String, o : A::Type, ds : Array({UInt64, UInt64})? = nil)
       case o
       when H
         o.each do |k, v|
           ke = k.gsub(".", "\\.")
-          set i, p.empty? ? ke : "#{p}.#{ke}", v.raw
+          set i, p.empty? ? ke : "#{p}.#{ke}", v.raw, ds
         end
         return
       when AA
-        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw }
+        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw, ds }
         return
       else
         oe = encode o
       end
       @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
       d = digest p, oe
-      @index.add i.to_bytes, [(Oid.new d).to_string]
+      ds << d if ds
       @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
     end
 
@@ -249,7 +249,10 @@ module Trove
         if @index.has_object? i.to_bytes
           ttx.delete i, p unless p.empty?
         end
-        ttx.set i, p, o.raw
+        ds = [] of {UInt64, UInt64}
+        ttx.set i, p, o.raw, ds
+        ib = i.to_bytes
+        @index.add ib, ds.map { |d| (Oid.new d).to_string }
       end
     end
 
