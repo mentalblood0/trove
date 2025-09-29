@@ -352,13 +352,14 @@ module Trove
       end
     end
 
-    def where(p : String, v : I, &)
-      @index.find [(Oid.new digest p, encode v).to_string] { |o| yield Oid.from_bytes o }
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, &)
+      @index.find present.map { |p, v| (Oid.new digest p, encode v).to_string },
+        absent.map { |p, v| (Oid.new digest p, encode v).to_string } { |o| yield Oid.from_bytes o }
     end
 
-    def where(p : String, v : I)
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I)
       r = [] of Oid
-      where(p, v) { |i| r << i }
+      where(present, absent) { |i| r << i }
       r
     end
 
