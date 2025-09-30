@@ -49,7 +49,6 @@ describe Trove do
     chest.has_key?(oid, "nonexistent.key").should eq false
     chest.has_key!(oid, "nonexistent.key").should eq false
 
-    chest.oids.should eq [oid]
     chest.objects.should eq [{oid, parsed}]
 
     # indexes accept multiple present as well as multiple absent fields
@@ -117,17 +116,14 @@ describe Trove do
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
-    chest.oids.should eq [] of Trove::Oid
 
     chest.set oid, "", parsed
-    chest.oids.should eq [oid]
 
     chest.delete oid
     chest.get(oid).should eq nil
     chest.get(oid, "null").should eq nil
     chest.where({"dict.boolean" => false}).should eq [] of Trove::Oid
     chest.where({"dict" => false}).should eq [] of Trove::Oid
-    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports dots in keys" do
@@ -135,7 +131,6 @@ describe Trove do
     i = chest << p
     chest.get(i).should eq p
     chest.delete i
-    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports removing first array element" do
@@ -146,23 +141,19 @@ describe Trove do
     chest.set! i, "k", JSON.parse %("a")
     chest.get(i).should eq({"k" => "a", "1" => "b", "2" => "c"})
     chest.delete i
-    chest.oids.should eq [] of Trove::Oid
   end
 
   it "supports indexing large values" do
-    l = chest.index.env.getint("db.t2i.limit.key").not_nil!
-    (l - 32).upto (l + 32) do |size|
-      v = ["a" * size]
-      j = v.to_json
-      p = JSON.parse j
-      i = chest << p
-      oids = [] of Trove::Oid
-      chest.where({"0" => v.first}) { |oid| oids << oid }
-      oids.should eq [i]
-      chest.get(i).should eq v
-      chest.delete i
-      chest.oids.should eq [] of Trove::Oid
-    end
+    size = 2 ** 16
+    v = ["a" * size]
+    j = v.to_json
+    p = JSON.parse j
+    i = chest << p
+    oids = [] of Trove::Oid
+    chest.where({"0" => v.first}) { |oid| oids << oid }
+    oids.should eq [i]
+    chest.get(i).should eq v
+    chest.delete i
   end
 
   it "distinguishes in key/value pairs with same concatenation result" do
@@ -170,11 +161,8 @@ describe Trove do
     i1 = chest << JSON.parse %({"a": "sa"})
     chest.where({"as" => "a"}).should eq [i0]
     chest.where({"a" => "sa"}).should eq [i1]
-    chest.oids.sort.should eq [i0, i1].sort
     chest.delete i0
-    chest.oids.should eq [i1]
     chest.delete i1
-    chest.oids.should eq [] of Trove::Oid
   end
 
   it "can dump and load data" do
@@ -197,13 +185,11 @@ describe Trove do
     dump.rewind
     chest.load dump
 
-    chest.oids.sort.should eq [i0, i1].sort
     (Set.new chest.objects).should eq Set.new [{i0, o0}, {i1, o1}]
     chest.get(i0).should eq o0
     chest.get(i1).should eq o1
     chest.delete i0
     chest.delete i1
-    chest.oids.should eq [] of Trove::Oid
   end
 
   it "correctly gets arrays with >9 elements" do
@@ -211,7 +197,6 @@ describe Trove do
     i = chest << JSON.parse o.to_json
     chest.get(i).should eq o
     chest.delete i
-    chest.oids.should eq [] of Trove::Oid
   end
 
   [

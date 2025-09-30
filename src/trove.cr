@@ -22,7 +22,9 @@ module Trove
                                       ui1: UInt64}}} #         oid last 64bits
 
   struct Oid
-    getter value : {UInt64, UInt64}
+    alias Value = {UInt64, UInt64}
+
+    getter value : Value
 
     def initialize(@value)
     end
@@ -79,16 +81,6 @@ module Trove
       pb.to_unsafe.copy_to ds.to_unsafe, pb.bytesize
       ve.copy_to ds.to_unsafe + pb.size + 1, ve.size
       digest ds
-    end
-
-    def oids(&)
-      @index.objects { |o| yield Oid.from_bytes o }
-    end
-
-    def oids
-      r = [] of Oid
-      oids { |i| r << i }
-      r
     end
 
     macro myo
@@ -224,7 +216,7 @@ module Trove
       end
     end
 
-    protected def set(i : Oid, p : String, o : A::Type, ds : Array(Bytes)? = nil)
+    protected def set(i : Oid, p : String, o : A::Type, ds : Array(Oid::Value)? = nil)
       case o
       when H
         o.each do |k, v|
@@ -241,25 +233,25 @@ module Trove
       @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
       d = digest p, oe
       if ds
-        ds << (Oid.new d).to_bytes
+        ds << d
       else
-        @index.add i.to_bytes, [(Oid.new d).to_bytes]
+        @index.add i.value, [d]
       end
       @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
     end
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
-        ttx.delete i, p if @index.has_object? i.to_bytes
-        ds = [] of Bytes
+        ttx.delete i, p
+        ds = [] of Oid::Value
         ttx.set i, p, o.raw, ds
-        @index.add i.to_bytes, ds
+        @index.add i.value, ds
       end
     end
 
     protected def deletei(i : Oid, p : String)
       dg = digest p, (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
-      @index.delete i.to_bytes, [(Oid.new dg).to_bytes]
+      @index.delete i.value, [dg]
       @env.delete({upv0: dg[0], upv1: dg[1]})
     end
 
@@ -332,14 +324,14 @@ module Trove
       decode @env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
-    protected def delete(i : Oid, p : String, ve : Bytes, dgs : Array(Bytes)? = nil)
+    protected def delete(i : Oid, p : String, ve : Bytes, dgs : Array(Oid::Value)? = nil)
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
         dg = digest p, ve
         if dgs
-          dgs << (Oid.new dg).to_bytes
+          dgs << dg
         else
-          @index.delete i.to_bytes, [(Oid.new dg).to_bytes]
+          @index.delete i.value, [dg]
         end
         ttx.env.delete({upv0: dg[0], upv1: dg[1]})
       end
@@ -347,12 +339,12 @@ module Trove
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
-        dgs = [] of Bytes
+        dgs = [] of Oid::Value
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
           break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
           delete i, d[:dp], d[:dv], dgs
         end
-        @index.delete i.to_bytes, dgs
+        @index.delete i.value, dgs
       end
     end
 
@@ -363,11 +355,11 @@ module Trove
     end
 
     def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, &)
-      @index.find present.map { |p, v| (Oid.new digest p, encode v).to_bytes },
-        absent.map { |p, v| (Oid.new digest p, encode v).to_bytes } { |o| yield Oid.from_bytes o }
+      @index.find present.map { |p, v| digest p, encode v },
+        absent.map { |p, v| digest p, encode v } { |o| yield Oid.new o }
     end
 
-    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I)
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I) : Array(Oid)
       r = [] of Oid
       where(present, absent) { |i| r << i }
       r
