@@ -250,13 +250,10 @@ module Trove
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
-        if @index.has_object? i.to_bytes
-          ttx.delete i, p unless p.empty?
-        end
+        ttx.delete i, p if @index.has_object? i.to_bytes
         ds = [] of String
         ttx.set i, p, o.raw, ds
-        ib = i.to_bytes
-        @index.add ib, ds
+        @index.add i.to_bytes, ds
       end
     end
 
