@@ -5,16 +5,14 @@ env:
     db:
       d: &ddbs
         compression: zstd
-      u:
-        *ddbs
 index:
   env:
     opts:
       sophia:
         path: /tmp/trove/index
       db:
-        t2o: &ddbs
-          compression: zstd
+        t2o:
+          *ddbs
         o2t:
           *ddbs
         d2v:

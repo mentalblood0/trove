@@ -12,14 +12,10 @@ module Trove
   alias H = Hash(String, A)
   alias AA = Array(A)
 
-  Sophia.define_env Env, {d: {key: {di0: UInt64,     # data: oid first 64bits
-                                    di1: UInt64,     #       oid last 64bits
-                                    dp: String},     #       path
-                              value: {dv: Bytes}},   #       value
-                          u: {key: {upv0: UInt64,    # unique: path and value digest first 64bits
-                                    upv1: UInt64},   #         path and value digest last 64bits
-                              value: {ui0: UInt64,   #         oid first 64bits
-                                      ui1: UInt64}}} #         oid last 64bits
+  Sophia.define_env Env, {d: {key: {di0: UInt64,   # data: oid first 64bits
+                                    di1: UInt64,   #       oid last 64bits
+                                    dp: String},   #       path
+                              value: {dv: Bytes}}} #       value
 
   struct Oid
     alias Value = {UInt64, UInt64}
@@ -58,6 +54,18 @@ module Trove
     end
   end
 
+  def self.digest(s : Bytes)
+    d = LibXxhash.xxhash128 s, s.size, 0
+    {d.high64, d.low64}
+  end
+
+  def self.digest(pb : String, ve : Bytes)
+    ds = Bytes.new pb.size + 1 + ve.size
+    pb.to_unsafe.copy_to ds.to_unsafe, pb.bytesize
+    ve.copy_to ds.to_unsafe + pb.size + 1, ve.size
+    digest ds
+  end
+
   class Chest
     include YAML::Serializable
     include YAML::Serializable::Strict
@@ -69,18 +77,6 @@ module Trove
     property intx = false
 
     def initialize(@env, @index)
-    end
-
-    protected def digest(s : Bytes)
-      d = LibXxhash.xxhash128 s, s.size, 0
-      {d.high64, d.low64}
-    end
-
-    protected def digest(pb : String, ve : Bytes)
-      ds = Bytes.new pb.size + 1 + ve.size
-      pb.to_unsafe.copy_to ds.to_unsafe, pb.bytesize
-      ve.copy_to ds.to_unsafe + pb.size + 1, ve.size
-      digest ds
     end
 
     macro myo
@@ -216,49 +212,83 @@ module Trove
       end
     end
 
-    protected def set(i : Oid, p : String, o : A::Type, ds : Array(Oid::Value)? = nil)
+    class IndexBatch
+      getter i : Oid
+      getter chest : Chest
+      getter for_delete : Bool
+      getter normal : Array(Oid::Value) = [] of Oid::Value
+      getter array : Hash(UInt64, Array(Oid::Value)) = {} of UInt64 => Array(Oid::Value)
+
+      def initialize(@i, @chest, @for_delete = false)
+      end
+
+      protected def partition(p : String)
+        pp = p.rpartition '.'
+        {b: pp[0], i: pp[2].to_u64} rescue {b: p, i: nil}
+      end
+
+      def <<(poe : {p: String, oe: Bytes})
+        pp = partition poe[:p]
+        if pp[:i]
+          n = pp[:i].not_nil!
+          ad = Trove.digest pp[:b], poe[:oe] + i.to_bytes
+          @chest.index.find [ad] { |id| return if id[1] != n } if for_delete
+
+          @array[n] = [] of Oid::Value unless @array.has_key? n
+          @array[n] << ad
+          @normal << Trove.digest pp[:b], poe[:oe]
+        else
+          @normal << Trove.digest poe[:p], poe[:oe]
+        end
+      end
+
+      def add
+        @chest.index.add i.value, @normal
+        @array.each { |n, d| @chest.index.add({0_u64, n}, d) }
+      end
+
+      def delete
+        raise Exception.new "Can not delete unless for_delete" unless @for_delete
+        @chest.index.delete i.value, @normal
+      end
+    end
+
+    protected def set(i : Oid, p : String, o : A::Type, ib : IndexBatch? = nil)
       case o
       when H
         o.each do |k, v|
           ke = k.gsub(".", "\\.")
-          set i, p.empty? ? ke : "#{p}.#{ke}", v.raw, ds
+          set i, p.empty? ? ke : "#{p}.#{ke}", v.raw, ib
         end
-        return
+        return ib
       when AA
-        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw, ds }
-        return
+        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw, ib }
+        return ib
       else
         oe = encode o
       end
+      ib << {p: p, oe: oe} if ib
       @env << {di0: i.value[0], di1: i.value[1], dp: p, dv: oe}
-      d = digest p, oe
-      if ds
-        ds << d
-      else
-        @index.add i.value, [d]
-      end
-      @env << {upv0: d[0], upv1: d[1], ui0: i.value[0], ui1: i.value[1]}
+      ib
     end
 
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
         ttx.delete i, p
-        ds = [] of Oid::Value
-        ttx.set i, p, o.raw, ds
-        @index.add i.value, ds
+        (ttx.set i, p, o.raw, IndexBatch.new i, self).add
       end
     end
 
     protected def deletei(i : Oid, p : String)
-      dg = digest p, (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
-      @index.delete i.value, [dg]
-      @env.delete({upv0: dg[0], upv1: dg[1]})
+      ib = IndexBatch.new i, self
+      ib << {p: p, oe: (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)}
+      ib.delete
     end
 
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
         deletei i, p
-        ttx.set i, p, o.raw
+        (ttx.set i, p, o.raw, IndexBatch.new i, self).add
       end
     end
 
@@ -324,52 +354,40 @@ module Trove
       decode @env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
-    protected def delete(i : Oid, p : String, ve : Bytes, dgs : Array(Oid::Value)? = nil)
+    protected def delete(i : Oid, p : String, ve : Bytes, ib : IndexBatch)
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
-        dg = digest p, ve
-        if dgs
-          dgs << dg
-        else
-          @index.delete i.value, [dg]
-        end
-        ttx.env.delete({upv0: dg[0], upv1: dg[1]})
+        ib << {p: p, oe: ve}
       end
+      ib
     end
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
-        dgs = [] of Oid::Value
+        ib = IndexBatch.new i, self, true
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
           break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-          delete i, d[:dp], d[:dv], dgs
+          delete i, d[:dp], d[:dv], ib
         end
-        @index.delete i.value, dgs
+        ib.delete
       end
     end
 
     def delete!(i : Oid, p : String = "")
       transaction do |ttx|
-        delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)
+        (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self, true).delete
       end
     end
 
     def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, &)
-      @index.find present.map { |p, v| digest p, encode v },
-        absent.map { |p, v| digest p, encode v } { |o| yield Oid.new o }
+      @index.find present.map { |p, v| Trove.digest p, encode v },
+        absent.map { |p, v| Trove.digest p, encode v } { |o| yield Oid.new o }
     end
 
     def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I) : Array(Oid)
       r = [] of Oid
       where(present, absent) { |i| r << i }
       r
-    end
-
-    def unique(p : String, v : I)
-      dg = digest p, encode v
-      u = @env[{upv0: dg[0], upv1: dg[1]}]?
-      return nil unless u
-      Oid.new({u[:ui0], u[:ui1]})
     end
   end
 end

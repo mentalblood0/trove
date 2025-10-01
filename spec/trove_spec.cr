@@ -55,23 +55,13 @@ describe Trove do
 
     chest.where({"dict.boolean" => false}).should eq [oid]
     chest.where({"dict.boolean" => true}).should eq [] of Trove::Oid
-    chest.where({"dict.hello.0" => "number"}).should eq [oid]
-    chest.where({"dict.hello" => "number"}).should eq [] of Trove::Oid
+    chest.where({"dict.hello" => "number"}).should eq [oid]
     chest.where({"dict.boolean" => false,
-                 "dict.hello.0" => "number"}).should eq [oid]
+                 "dict.hello"   => "number"}).should eq [oid]
     chest.where({"dict.boolean" => true,
-                 "dict.hello.0" => "number"}).should eq [] of Trove::Oid
-    chest.where({"dict.boolean" => false}, {"dict.hello.0" => "number"}).should eq [] of Trove::Oid
-    chest.where({"dict.boolean" => false}, {"dict.hello.0" => "lalala"}).should eq [oid]
-
-    # unique is way faster than where,
-    # but accepts only one present field and
-    # works correctly only for values that were always unique
-
-    chest.unique("dict.boolean", false).should eq oid
-    chest.unique("dict.hello.0", "number").should eq oid
-    chest.unique("dict.hello", "number").should eq nil
-    chest.unique("dict.hello.1", 42_i64).should eq oid
+                 "dict.hello"   => "number"}).should eq [] of Trove::Oid
+    chest.where({"dict.boolean" => false}, {"dict.hello" => "number"}).should eq [] of Trove::Oid
+    chest.where({"dict.boolean" => false}, {"dict.hello" => "lalala"}).should eq [oid]
 
     chest.delete! oid, "dict.hello"
     chest.get(oid, "dict.hello").should eq ["number", 42, -4.2, 0.0]
@@ -79,7 +69,6 @@ describe Trove do
     chest.delete! oid, "dict.hello.2"
     chest.get(oid, "dict.hello.2").should eq nil
     chest.get(oid, "dict.hello").should eq ["number", 42, 0.0]
-    chest.where({"dict.hello.2" => -4.2}).should eq [] of Trove::Oid
     chest.where({"dict.hello" => -4.2}).should eq [] of Trove::Oid
 
     chest.delete oid, "dict.hello"
@@ -126,6 +115,17 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
+  it "correctly handles repeated values in arrays", focus: true do
+    p = JSON.parse %([2, 2, 1])
+    i = chest << p
+    chest.where({"" => 2_i64}).should eq [i]
+    chest.delete! i, "0"
+    chest.where({"" => 2_i64}).should eq [i]
+    chest.delete! i, "1"
+    chest.where({"" => 2_i64}).should eq [] of Trove::Oid
+    chest.delete i
+  end
+
   it "supports dots in keys" do
     p = JSON.parse %({"a.b.c": 1})
     i = chest << p
@@ -149,9 +149,7 @@ describe Trove do
     j = v.to_json
     p = JSON.parse j
     i = chest << p
-    oids = [] of Trove::Oid
-    chest.where({"0" => v.first}) { |oid| oids << oid }
-    oids.should eq [i]
+    chest.where({"" => v.first}).should eq [i]
     chest.get(i).should eq v
     chest.delete i
   end
@@ -237,7 +235,7 @@ describe Trove do
       when Array
         o.each_with_index do |v, k|
           chest.has_key!(i, k.to_s).should eq true
-          chest.where({k.to_s => v}).should eq [i]
+          chest.where({"" => v}).should eq [i]
         end
       when Hash(String, String)
         o.each do |k, v|

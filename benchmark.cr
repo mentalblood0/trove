@@ -37,9 +37,6 @@ end
 Benchmark.ips do |b|
   n = 10**4 - 1
   (1..n).each { chest << cs }
-  b.report "get one oid from index (unique)" do
-    chest.unique k, v
-  end
   b.report "get one oid from index" do
     chest.where({k => v}) { |ii| break }
   end
