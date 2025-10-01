@@ -267,7 +267,6 @@ module Trove
     end
 
     protected def deletei(i : Oid, p : String)
-      return unless has_key! i, p
       ib = IndexBatch.new i, self
       ib << {p: p, oe: (@env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return)}
       ib.delete
@@ -275,7 +274,7 @@ module Trove
 
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
-        deletei i, p
+        deletei i, p if has_key! i, p
         (ttx.set i, p, o.raw, IndexBatch.new i, self).add
       end
     end
@@ -343,7 +342,6 @@ module Trove
     end
 
     protected def delete(i : Oid, p : String, ve : Bytes, ib : IndexBatch)
-      return ib unless has_key? i, p
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
         ib << {p: p, oe: ve}
@@ -352,6 +350,7 @@ module Trove
     end
 
     def delete(i : Oid, p : String = "")
+      return unless has_key? i, p
       transaction do |ttx|
         ib = IndexBatch.new i, self
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
@@ -363,6 +362,7 @@ module Trove
     end
 
     def delete!(i : Oid, p : String = "")
+      return unless has_key! i, p
       transaction do |ttx|
         (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self).delete
       end
