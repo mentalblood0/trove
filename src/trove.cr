@@ -250,8 +250,18 @@ module Trove
         end
         return ib
       when AA
-        o.uniq!
-        o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw, ib }
+        k = 0
+        u = Set(String | Int64 | Float64 | Bool | Nil).new
+        o.each do |v|
+          raw = v.raw
+          case raw
+          when String, Int64, Float64, Bool, Nil
+            next if u.includes? raw
+            u << raw
+          end
+          set i, p.empty? ? k.to_s : "#{p}.#{k}", raw, ib
+          k += 1
+        end
         return ib
       else
         oe = encode o
