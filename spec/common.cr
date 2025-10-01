@@ -39,7 +39,7 @@ COMPLEX_STRUCTURE = {
               "isValid" => true,
               "level5"  => {
                 "description" => "Deeply nested object",
-                "flags"       => [true, true, false, true],
+                "flags"       => {"a" => true, "b" => true, "c" => false, "d" => true},
                 "level6"      => {
                   "final" => true,
                   "note"  => "This is six levels deep",

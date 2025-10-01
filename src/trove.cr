@@ -215,11 +215,9 @@ module Trove
     class IndexBatch
       getter i : Oid
       getter chest : Chest
-      getter for_delete : Bool
-      getter normal : Array(Oid::Value) = [] of Oid::Value
-      getter array : Hash(UInt64, Array(Oid::Value)) = {} of UInt64 => Array(Oid::Value)
+      getter ds : Array(Oid::Value) = [] of Oid::Value
 
-      def initialize(@i, @chest, @for_delete = false)
+      def initialize(@i, @chest)
       end
 
       protected def partition(p : String)
@@ -229,27 +227,15 @@ module Trove
 
       def <<(poe : {p: String, oe: Bytes})
         pp = partition poe[:p]
-        if pp[:i]
-          n = pp[:i].not_nil!
-          ad = Trove.digest pp[:b], poe[:oe] + i.to_bytes
-          @chest.index.find [ad] { |id| return if id[1] != n } if for_delete
-
-          @array[n] = [] of Oid::Value unless @array.has_key? n
-          @array[n] << ad
-          @normal << Trove.digest pp[:b], poe[:oe]
-        else
-          @normal << Trove.digest poe[:p], poe[:oe]
-        end
+        @ds << (pp[:i] ? (Trove.digest pp[:b], poe[:oe]) : (Trove.digest poe[:p], poe[:oe]))
       end
 
       def add
-        @chest.index.add i.value, @normal
-        @array.each { |n, d| @chest.index.add({0_u64, n}, d) }
+        @chest.index.add i.value, @ds
       end
 
       def delete
-        raise Exception.new "Can not delete unless for_delete" unless @for_delete
-        @chest.index.delete i.value, @normal
+        @chest.index.delete i.value, @ds
       end
     end
 
@@ -262,6 +248,7 @@ module Trove
         end
         return ib
       when AA
+        o.uniq!
         o.each_with_index { |v, k| set i, p.empty? ? k.to_s : "#{p}.#{k}", v.raw, ib }
         return ib
       else
@@ -364,7 +351,7 @@ module Trove
 
     def delete(i : Oid, p : String = "")
       transaction do |ttx|
-        ib = IndexBatch.new i, self, true
+        ib = IndexBatch.new i, self
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
           break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
           delete i, d[:dp], d[:dv], ib
@@ -375,7 +362,7 @@ module Trove
 
     def delete!(i : Oid, p : String = "")
       transaction do |ttx|
-        (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self, true).delete
+        (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self).delete
       end
     end
 

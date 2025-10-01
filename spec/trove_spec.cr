@@ -115,14 +115,10 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
-  it "correctly handles repeated values in arrays", focus: true do
+  it "arrays are converted to sets when added" do
     p = JSON.parse %([2, 2, 1])
     i = chest << p
-    chest.where({"" => 2_i64}).should eq [i]
-    chest.delete! i, "0"
-    chest.where({"" => 2_i64}).should eq [i]
-    chest.delete! i, "1"
-    chest.where({"" => 2_i64}).should eq [] of Trove::Oid
+    (chest.get i).should eq JSON.parse [2, 1].to_json
     chest.delete i
   end
 
