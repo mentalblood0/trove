@@ -140,9 +140,11 @@ module Trove
         yield self
       else
         @env.transaction do |tx|
-          r = Chest.new tx, @index
-          r.intx = true
-          yield r
+          @index.transaction do |itx|
+            r = Chest.new tx, itx
+            r.intx = true
+            yield r
+          end
         end
       end
     end
