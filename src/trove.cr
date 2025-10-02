@@ -22,6 +22,14 @@ module Trove
 
     getter value : Value
 
+    getter bytes : Bytes {
+      r = Bytes.new 16
+      IO::ByteFormat::BigEndian.encode value[0], r[0..7]
+      IO::ByteFormat::BigEndian.encode value[1], r[8..15]
+      r
+    }
+    getter string : String { bytes.hexstring }
+
     def initialize(@value)
     end
 
@@ -40,17 +48,6 @@ module Trove
 
     def <=>(other : Oid)
       @value <=> other.value
-    end
-
-    def to_bytes
-      r = Bytes.new 16
-      IO::ByteFormat::BigEndian.encode value[0], r[0..7]
-      IO::ByteFormat::BigEndian.encode value[1], r[8..15]
-      r
-    end
-
-    def to_string
-      to_bytes.hexstring
     end
   end
 
@@ -119,7 +116,7 @@ module Trove
         objects do |oid, o|
           oid0 = oid.value[0]
           oid1 = oid.value[1]
-          gzip.puts({"oid"  => oid.to_string,
+          gzip.puts({"oid"  => oid.string,
                      "data" => o}.to_json)
         end
       end
