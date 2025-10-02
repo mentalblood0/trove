@@ -384,7 +384,7 @@ module Trove
       @index.find(
         present.map { |p, v| Trove.digest p, encode v },
         absent.map { |p, v| Trove.digest p, encode v },
-        from) { |o| yield Oid.new o }
+        from ? from.value : nil) { |o| yield Oid.new o }
     end
 
     def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil) : Array(Oid)
