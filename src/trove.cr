@@ -380,14 +380,16 @@ module Trove
       end
     end
 
-    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, &)
-      @index.find present.map { |p, v| Trove.digest p, encode v },
-        absent.map { |p, v| Trove.digest p, encode v } { |o| yield Oid.new o }
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil, &)
+      @index.find(
+        present.map { |p, v| Trove.digest p, encode v },
+        absent.map { |p, v| Trove.digest p, encode v },
+        from) { |o| yield Oid.new o }
     end
 
-    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I) : Array(Oid)
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil) : Array(Oid)
       r = [] of Oid
-      where(present, absent) { |i| r << i }
+      where(present, absent, from) { |i| r << i }
       r
     end
   end
