@@ -63,6 +63,11 @@ module Trove
     digest ds
   end
 
+  def self.partition(p : String)
+    pp = p.rpartition '.'
+    {b: pp[0], i: pp[2].to_u32} rescue {b: p, i: nil}
+  end
+
   class Chest
     include YAML::Serializable
     include YAML::Serializable::Strict
@@ -146,8 +151,6 @@ module Trove
       end
     end
 
-    alias I = String | Int64 | Float64 | Bool | Nil
-
     protected def encode(v : I) : Bytes
       case v
       when String
@@ -215,27 +218,56 @@ module Trove
       getter i : Oid
       getter chest : Chest
       getter ds : Array(Oid::Value) = [] of Oid::Value
+      getter ads : Hash(UInt32, Array(Oid::Value)) = {} of UInt32 => Array(Oid::Value)
 
       def initialize(@i, @chest)
       end
 
-      protected def partition(p : String)
-        pp = p.rpartition '.'
-        {b: pp[0], i: pp[2].to_u64} rescue {b: p, i: nil}
-      end
-
       def <<(poe : {p: String, oe: Bytes})
-        pp = partition poe[:p]
-        @ds << (pp[:i] ? (Trove.digest pp[:b], poe[:oe]) : (Trove.digest poe[:p], poe[:oe]))
+        pp = Trove.partition poe[:p]
+        if n = pp[:i]
+          @ds << Trove.digest pp[:b], poe[:oe]
+          @ads[n] = [] of Oid::Value unless @ads.has_key? pp[:i]
+          ad = Trove.digest pp[:b], @i.bytes + poe[:oe]
+          @ads[n] << ad
+        else
+          @ds << Trove.digest poe[:p], poe[:oe]
+        end
       end
 
       def add
-        @chest.index.add i.value, @ds
+        @chest.index.add @i.value, @ds
+        @ads.each do |n, nds|
+          @chest.index.add({0_u64, n.to_u64}, nds)
+        end
       end
 
       def delete
-        @chest.index.delete i.value, @ds
+        @chest.index.delete @i.value, @ds
+        @ads.each { |n, nds| @chest.index.delete({0_u64, n.to_u64}, nds) }
       end
+    end
+
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil, &)
+      @index.find(
+        present.map { |p, v| Trove.digest pad(p), encode v },
+        absent.map { |p, v| Trove.digest pad(p), encode v },
+        from ? from.value : nil) { |o| yield Oid.new o }
+    end
+
+    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil) : Array(Oid)
+      r = [] of Oid
+      where(present, absent, from) { |i| r << i }
+      r
+    end
+
+    alias I = String | Int64 | Float64 | Bool | Nil
+
+    def index(i : Oid, p : String, o : I) : UInt32?
+      p = pad p
+      pp = Trove.partition p
+      d = Trove.digest pp[:b], i.bytes + encode o
+      @index.find([d]) { |r| return r[1].to_u32 }
     end
 
     protected def set(i : Oid, p : String, o : A::Type, ib : IndexBatch? = nil)
@@ -337,7 +369,7 @@ module Trove
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}."}) do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-        rp = unpad(d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10])
+        rp = unpad d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10]
         return {rp, get i, rp}
       end
     end
@@ -346,7 +378,7 @@ module Trove
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: p.empty? ? "9" : "#{p}.9"}, "<=") do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-        rp = unpad(d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10])
+        rp = unpad d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10]
         return {rp, get i, rp}
       end
     end
@@ -416,19 +448,6 @@ module Trove
       transaction do |ttx|
         (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self).delete
       end
-    end
-
-    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil, &)
-      @index.find(
-        present.map { |p, v| Trove.digest pad(p), encode v },
-        absent.map { |p, v| Trove.digest pad(p), encode v },
-        from ? from.value : nil) { |o| yield Oid.new o }
-    end
-
-    def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil) : Array(Oid)
-      r = [] of Oid
-      where(present, absent, from) { |i| r << i }
-      r
     end
   end
 end

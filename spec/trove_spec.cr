@@ -115,6 +115,13 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
+  it "can get indexes of simple elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    i = chest << p
+    (0..10).each { |n| chest.index(i, "l", n.to_i64).should eq n.to_u32 }
+    chest.delete i
+  end
+
   it "can get first and last simple elements of root array" do
     p = JSON.parse (0..10).map { |n| n }.to_json
     i = chest << p
