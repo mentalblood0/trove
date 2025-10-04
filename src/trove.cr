@@ -316,7 +316,7 @@ module Trove
 
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
-        deletei i, p if has_key! i, p
+        ttx.deletei i, p if has_key! i, p
         (ttx.set i, p, o.raw, IndexBatch.new i, ttx).add
       end
     end
