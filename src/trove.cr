@@ -349,6 +349,13 @@ module Trove
       end
     end
 
+    def push(i : Oid, p : String, o : A)
+      p = pad p
+      lp = ((last i, p).not_nil![0] rescue "#{p}.0")
+      pp = lp.gsub(/\d+$/) { |s| (s.to_u32 + 1).to_s.rjust 10, '0' }
+      set i, pp, o
+    end
+
     def has_key?(i : Oid, p : String = "")
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|

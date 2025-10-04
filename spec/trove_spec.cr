@@ -127,6 +127,14 @@ describe Trove do
     chest.delete i
   end
 
+  it "can push elements to array" do
+    p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
+    i = chest << p
+    chest.push i, "l", p
+    chest.get(i, "l.11").should eq p
+    chest.delete i
+  end
+
   it "convert arrays to sets add them" do
     p = JSON.parse %([2, 2, 1])
     i = chest << p
