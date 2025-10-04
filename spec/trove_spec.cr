@@ -115,20 +115,64 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
-  it "can search first and last elements of array" do
-    p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
+  it "can get first and last simple elements of root array" do
+    p = JSON.parse (0..10).map { |n| n }.to_json
     i = chest << p
-    chest.first(i, "l").should eq({"l.0", 1})
-    chest.last(i, "l").should eq({"l.10", 11})
-    chest.delete! i, "l.0"
-    chest.delete! i, "l.10"
-    chest.first(i, "l").should eq({"l.1", 2})
-    chest.last(i, "l").should eq({"l.9", 10})
+    chest.first(i, "").should eq({"0", 0})
+    chest.last(i, "").should eq({"10", 10})
     chest.delete i
   end
 
-  it "can push elements to array" do
-    p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
+  it "can get first and last simple elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    i = chest << p
+    chest.first(i, "l").should eq({"l.0", 0})
+    chest.last(i, "l").should eq({"l.10", 10})
+    chest.delete i
+  end
+
+  it "can get first and last complex elements of root array" do
+    p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
+    i = chest << p
+    chest.first(i, "").should eq({"0", {"n" => 0}})
+    chest.last(i, "").should eq({"10", {"n" => 10}})
+    chest.delete i
+  end
+
+  it "can get first and last complex elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
+    i = chest << p
+    chest.first(i, "l").should eq({"l.0", {"n" => 0}})
+    chest.last(i, "l").should eq({"l.10", {"n" => 10}})
+    chest.delete i
+  end
+
+  it "can push simple elements to root array" do
+    p = JSON.parse (0..10).map { |n| n }.to_json
+    i = chest << p
+    chest.push i, "", p
+    chest.get(i, "11").should eq p
+    chest.delete i
+  end
+
+  it "can push simple elements to non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    i = chest << p
+    chest.push i, "l", p
+    chest.get(i, "l.11").should eq p
+    chest.delete i
+  end
+
+  it "can push complex elements to root array" do
+    p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
+    i = chest << p
+    chest.push i, "", p
+    chest.get(i, "11").should eq p
+    chest.delete i
+  end
+
+  it "can push complex elements to non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
     i = chest << p
     chest.push i, "l", p
     chest.get(i, "l.11").should eq p

@@ -326,26 +326,28 @@ module Trove
     end
 
     protected def pad(p : String)
-      p.gsub(/\b\d{1,9}\b/) { |s| s.rjust(10, '0') }
+      p.gsub(/\b\d{1,9}\b/) { |s| s.rjust 10, '0' }
     end
 
     protected def unpad(p : String)
-      p.gsub(/\b0+(\d+)\b/) { |s| $1 }
+      p.gsub(/\b0+(\d+)\b/) { $1 }
     end
 
     def first(i : Oid, p : String = "")
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}."}) do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-        return {unpad(d[:dp]), decode d[:dv]}
+        rp = unpad(d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10])
+        return {rp, get i, rp}
       end
     end
 
     def last(i : Oid, p : String = "")
       p = pad p
-      @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}.9"}, "<=") do |d|
+      @env.from({di0: i.value[0], di1: i.value[1], dp: p.empty? ? "9" : "#{p}.9"}, "<=") do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-        return {unpad(d[:dp]), decode d[:dv]}
+        rp = unpad(d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10])
+        return {rp, get i, rp}
       end
     end
 
@@ -353,7 +355,7 @@ module Trove
       p = pad p
       lp = ((last i, p).not_nil![0] rescue "#{p}.0")
       pp = lp.gsub(/\d+$/) { |s| (s.to_u32 + 1).to_s.rjust 10, '0' }
-      set i, pp, o
+      transaction { |ttx| (ttx.set i, pp, o.raw, IndexBatch.new i, self).add }
     end
 
     def has_key?(i : Oid, p : String = "")
