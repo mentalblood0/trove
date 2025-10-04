@@ -446,7 +446,7 @@ module Trove
       p = pad p
       return unless has_key! i, p
       transaction do |ttx|
-        (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self).delete
+        (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, ttx).delete
       end
     end
   end
