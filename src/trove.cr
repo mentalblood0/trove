@@ -387,7 +387,7 @@ module Trove
       f = pp[2].to_u32 + 1
       transaction do |ttx|
         os.each_with_index do |o, n|
-          (ttx.set i, "#{b}.#{(f + n).to_s.rjust 10, '0'}", o.raw, IndexBatch.new i, ttx).add
+          (ttx.set i, "#{b.empty? ? "" : "#{b}."}#{(f + n).to_s.rjust 10, '0'}", o.raw, IndexBatch.new i, ttx).add
         end
       end
     end

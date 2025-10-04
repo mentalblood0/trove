@@ -164,7 +164,7 @@ describe Trove do
   it "can push simple elements to root array" do
     p = JSON.parse (0..10).map { |n| n }.to_json
     i = chest << p
-    chest.push i, "", p
+    chest.push i, "", [p]
     chest.get(i, "11").should eq p
     chest.delete i
   end
@@ -172,7 +172,7 @@ describe Trove do
   it "can push simple elements to non-root array" do
     p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
     i = chest << p
-    chest.push i, "l", p
+    chest.push i, "l", [p]
     chest.get(i, "l.11").should eq p
     chest.delete i
   end
@@ -180,7 +180,7 @@ describe Trove do
   it "can push complex elements to root array" do
     p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
     i = chest << p
-    chest.push i, "", p
+    chest.push i, "", [p]
     chest.get(i, "11").should eq p
     chest.delete i
   end
@@ -188,7 +188,7 @@ describe Trove do
   it "can push complex elements to non-root array" do
     p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
     i = chest << p
-    chest.push i, "l", p
+    chest.push i, "l", [p]
     chest.get(i, "l.11").should eq p
     chest.delete i
   end
