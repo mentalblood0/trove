@@ -115,14 +115,17 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
-  # it "can search last element of array", focus: true do
-  #   p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
-  #   i = chest << p
-  #   chest.env.from({di0: i.value[0], di1: i.value[1], dp: "l.9"}, "<=") do |d|
-  #     puts d
-  #   end
-  #   chest.delete i
-  # end
+  it "can search first and last elements of array" do
+    p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
+    i = chest << p
+    chest.first(i, "l").should eq({"l.0", 1})
+    chest.last(i, "l").should eq({"l.10", 11})
+    chest.delete! i, "l.0"
+    chest.delete! i, "l.10"
+    chest.first(i, "l").should eq({"l.1", 2})
+    chest.last(i, "l").should eq({"l.9", 10})
+    chest.delete i
+  end
 
   it "convert arrays to sets add them" do
     p = JSON.parse %([2, 2, 1])

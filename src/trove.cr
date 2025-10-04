@@ -333,6 +333,22 @@ module Trove
       p.gsub(/\b0+(\d+)\b/) { |s| $1 }
     end
 
+    def first(i : Oid, p : String = "")
+      p = pad p
+      @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}."}) do |d|
+        break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
+        return {unpad(d[:dp]), decode d[:dv]}
+      end
+    end
+
+    def last(i : Oid, p : String = "")
+      p = pad p
+      @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}.9"}, "<=") do |d|
+        break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
+        return {unpad(d[:dp]), decode d[:dv]}
+      end
+    end
+
     def has_key?(i : Oid, p : String = "")
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
