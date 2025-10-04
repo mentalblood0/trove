@@ -304,7 +304,7 @@ module Trove
     def set(i : Oid, p : String, o : A)
       transaction do |ttx|
         ttx.delete i, p
-        (ttx.set i, p, o.raw, IndexBatch.new i, self).add
+        (ttx.set i, p, o.raw, IndexBatch.new i, ttx).add
       end
     end
 
@@ -317,7 +317,7 @@ module Trove
     def set!(i : Oid, p : String, o : A)
       transaction do |ttx|
         deletei i, p if has_key! i, p
-        (ttx.set i, p, o.raw, IndexBatch.new i, self).add
+        (ttx.set i, p, o.raw, IndexBatch.new i, ttx).add
       end
     end
 
@@ -387,7 +387,7 @@ module Trove
       p = pad p
       lp = ((last i, p).not_nil![0] rescue "#{p}.0")
       pp = lp.gsub(/\d+$/) { |s| (s.to_u32 + 1).to_s.rjust 10, '0' }
-      transaction { |ttx| (ttx.set i, pp, o.raw, IndexBatch.new i, self).add }
+      transaction { |ttx| (ttx.set i, pp, o.raw, IndexBatch.new i, ttx).add }
     end
 
     def has_key?(i : Oid, p : String = "")
@@ -433,7 +433,7 @@ module Trove
       p = pad p
       return unless has_key? i, p
       transaction do |ttx|
-        ib = IndexBatch.new i, self
+        ib = IndexBatch.new i, ttx
         ttx.env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
           break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
           delete i, d[:dp], d[:dv], ib
