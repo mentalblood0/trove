@@ -247,7 +247,7 @@ module Trove
         end
         return ib
       when AA
-        k = 0
+        k = 0_u32
         u = Set(String | Int64 | Float64 | Bool | Nil).new
         o.each do |v|
           raw = v.raw
@@ -256,7 +256,8 @@ module Trove
             next if u.includes? raw
             u << raw
           end
-          set i, p.empty? ? k.to_s : "#{p}.#{k}", raw, ib
+          kp = k.to_s.rjust 10, '0'
+          set i, p.empty? ? kp : "#{p}.#{kp}", raw, ib
           k += 1
         end
         return ib
@@ -324,7 +325,16 @@ module Trove
       r
     end
 
+    protected def pad(p : String)
+      p.gsub(/\b\d+\b/) { |s| s.rjust(10, '0') }
+    end
+
+    protected def unpad(p : String)
+      p.gsub(/\b0+(\d+)\b/) { |s| $1 }
+    end
+
     def has_key?(i : Oid, p : String = "")
+      p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
         return d[:di0] == i.value[0] && d[:di1] == i.value[1] && d[:dp].starts_with? p
       end
@@ -332,14 +342,16 @@ module Trove
     end
 
     def has_key!(i : Oid, p : String = "")
+      p = pad p
       @env.has_key?({di0: i.value[0], di1: i.value[1], dp: p})
     end
 
     def get(i : Oid, p : String = "")
+      p = pad p
       flat = H.new
       @env.from({di0: i.value[0], di1: i.value[1], dp: p}) do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
-        flat[d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
+        flat[unpad d[:dp].lchop(p).lchop('.')] = A.new decode d[:dv]
       end
       return nil if flat.size == 0
       return flat[""] if flat.has_key? ""
@@ -347,10 +359,12 @@ module Trove
     end
 
     def get!(i : Oid, p : String)
+      p = pad p
       decode @env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue nil
     end
 
     protected def delete(i : Oid, p : String, ve : Bytes, ib : IndexBatch)
+      p = pad p
       transaction do |ttx|
         ttx.env.delete({di0: i.value[0], di1: i.value[1], dp: p})
         ib << {p: p, oe: ve}
@@ -359,6 +373,7 @@ module Trove
     end
 
     def delete(i : Oid, p : String = "")
+      p = pad p
       return unless has_key? i, p
       transaction do |ttx|
         ib = IndexBatch.new i, self
@@ -371,6 +386,7 @@ module Trove
     end
 
     def delete!(i : Oid, p : String = "")
+      p = pad p
       return unless has_key! i, p
       transaction do |ttx|
         (delete i, p, (ttx.env[{di0: i.value[0], di1: i.value[1], dp: p}]?.not_nil![:dv] rescue return), IndexBatch.new i, self).delete
@@ -379,8 +395,8 @@ module Trove
 
     def where(present : Hash(String, I), absent : Hash(String, I) = {} of String => I, from : Oid? = nil, &)
       @index.find(
-        present.map { |p, v| Trove.digest p, encode v },
-        absent.map { |p, v| Trove.digest p, encode v },
+        present.map { |p, v| Trove.digest pad(p), encode v },
+        absent.map { |p, v| Trove.digest pad(p), encode v },
         from ? from.value : nil) { |o| yield Oid.new o }
     end
 

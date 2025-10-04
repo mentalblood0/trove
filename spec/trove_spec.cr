@@ -115,7 +115,16 @@ describe Trove do
     chest.where({"dict" => false}).should eq [] of Trove::Oid
   end
 
-  it "arrays are converted to sets when added" do
+  # it "can search last element of array", focus: true do
+  #   p = JSON.parse %({"l": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]})
+  #   i = chest << p
+  #   chest.env.from({di0: i.value[0], di1: i.value[1], dp: "l.9"}, "<=") do |d|
+  #     puts d
+  #   end
+  #   chest.delete i
+  # end
+
+  it "convert arrays to sets add them" do
     p = JSON.parse %([2, 2, 1])
     i = chest << p
     (chest.get i).should eq JSON.parse [2, 1].to_json
