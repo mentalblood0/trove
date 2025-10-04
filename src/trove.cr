@@ -57,7 +57,7 @@ module Trove
   end
 
   def self.digest(pb : String, ve : Bytes)
-    ds = Bytes.new pb.size + 1 + ve.size
+    ds = Bytes.new pb.bytesize + 1 + ve.size
     pb.to_unsafe.copy_to ds.to_unsafe, pb.bytesize
     ve.copy_to ds.to_unsafe + pb.size + 1, ve.size
     digest ds
@@ -228,8 +228,7 @@ module Trove
         if n = pp[:i]
           @ds << Trove.digest pp[:b], poe[:oe]
           @ads[n] = [] of Oid::Value unless @ads.has_key? pp[:i]
-          ad = Trove.digest pp[:b], @i.bytes + poe[:oe]
-          @ads[n] << ad
+          @ads[n] << Trove.digest pp[:b], @i.bytes + poe[:oe]
         else
           @ds << Trove.digest poe[:p], poe[:oe]
         end
@@ -237,9 +236,7 @@ module Trove
 
       def add
         @chest.index.add @i.value, @ds
-        @ads.each do |n, nds|
-          @chest.index.add({0_u64, n.to_u64}, nds)
-        end
+        @ads.each { |n, nds| @chest.index.add({0_u64, n.to_u64}, nds) }
       end
 
       def delete
@@ -266,8 +263,7 @@ module Trove
     def index(i : Oid, p : String, o : I) : UInt32?
       p = pad p
       pp = Trove.partition p
-      d = Trove.digest pp[:b], i.bytes + encode o
-      @index.find([d]) { |r| return r[1].to_u32 }
+      @index.find([Trove.digest pp[:b], i.bytes + encode o]) { |r| return r[1].to_u32 }
     end
 
     protected def set(i : Oid, p : String, o : A::Type, ib : IndexBatch? = nil)
@@ -383,11 +379,17 @@ module Trove
       end
     end
 
-    def push(i : Oid, p : String, o : A)
+    def push(i : Oid, p : String, os : AA)
       p = pad p
       lp = ((last i, p).not_nil![0] rescue "#{p}.0")
-      pp = lp.gsub(/\d+$/) { |s| (s.to_u32 + 1).to_s.rjust 10, '0' }
-      transaction { |ttx| (ttx.set i, pp, o.raw, IndexBatch.new i, ttx).add }
+      pp = lp.rpartition '.'
+      b = pp[0]
+      f = pp[2].to_u32 + 1
+      transaction do |ttx|
+        os.each_with_index do |o, n|
+          (ttx.set i, "#{b}.#{(f + n).to_s.rjust 10, '0'}", o.raw, IndexBatch.new i, ttx).add
+        end
+      end
     end
 
     def has_key?(i : Oid, p : String = "")
