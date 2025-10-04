@@ -326,7 +326,7 @@ module Trove
     end
 
     protected def pad(p : String)
-      p.gsub(/\b\d+\b/) { |s| s.rjust(10, '0') }
+      p.gsub(/\b\d{1,9}\b/) { |s| s.rjust(10, '0') }
     end
 
     protected def unpad(p : String)
