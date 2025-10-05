@@ -385,9 +385,18 @@ module Trove
       pp = lp.rpartition '.'
       b = pp[0]
       f = pp[2].to_u32 + 1
+      u = Set(String | Int64 | Float64 | Bool | Nil).new
       transaction do |ttx|
         os.each_with_index do |o, n|
-          (ttx.set i, "#{b.empty? ? "" : "#{b}."}#{(f + n).to_s.rjust 10, '0'}", o.raw, IndexBatch.new i, ttx).add
+          np = "#{b.empty? ? "" : "#{b}."}#{(f + n).to_s.rjust 10, '0'}"
+          case or = o.raw
+          when Bool, Float64, Int64, String, Nil
+            next if u.includes? or
+            u << or
+            npp = Trove.partition np
+            next if ttx.index.has_tag?({0_u64, n.to_u64}, Trove.digest npp[:b], i.bytes + encode or)
+          end
+          (ttx.set i, np, o.raw, IndexBatch.new i, ttx).add
         end
       end
     end

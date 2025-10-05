@@ -193,10 +193,18 @@ describe Trove do
     chest.delete i
   end
 
-  it "convert arrays to sets add them" do
+  it "do not add repeated elements when adding arrays" do
     p = JSON.parse %([2, 2, 1])
     i = chest << p
     (chest.get i).should eq JSON.parse [2, 1].to_json
+    chest.delete i
+  end
+
+  it "do not push repeated elements to arrays" do
+    p = JSON.parse (1..3).map { |n| n }.to_json
+    i = chest << p
+    chest.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }
+    chest.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
     chest.delete i
   end
 
