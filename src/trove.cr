@@ -311,7 +311,13 @@ module Trove
     end
 
     def set!(i : Oid, p : String, o : A)
+      p = pad p
       transaction do |ttx|
+        case or = o.raw
+        when Bool, Float64, Int64, String, Nil
+          pp = Trove.partition p
+          return if (ppi = pp[:i]) && ttx.index.has_tag? i.value, Trove.digest pp[:b], encode or
+        end
         ttx.deletei i, p if has_key! i, p
         (ttx.set i, p, o.raw, IndexBatch.new i, ttx).add
       end
@@ -394,7 +400,7 @@ module Trove
             next if u.includes? or
             u << or
             npp = Trove.partition np
-            next if ttx.index.has_tag?({0_u64, n.to_u64}, Trove.digest npp[:b], i.bytes + encode or)
+            next if ttx.index.has_tag? i.value, Trove.digest npp[:b], encode or
           end
           (ttx.set i, np, o.raw, IndexBatch.new i, ttx).add
         end
