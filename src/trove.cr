@@ -358,7 +358,7 @@ module Trove
     end
 
     protected def unpad(p : String)
-      p.gsub(/\b0+(\d+)\b/) { $1 }
+      p.gsub(/\b(\d{10})\b/) { (r = $1.lstrip '0').empty? ? "0" : r }
     end
 
     def first(i : Oid, p : String = "")
