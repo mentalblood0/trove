@@ -197,6 +197,15 @@ describe Trove do
     chest.delete i
   end
 
+  it "can push to empty array", focus: true do
+    p = JSON::Any.new 11
+    i = Trove::Oid.random
+    pi = chest.push i, "", [p]
+    pi.should eq 0
+    chest.get(i, "0").should eq p
+    chest.delete i
+  end
+
   it "do not add repeated elements when adding arrays" do
     p = JSON.parse %([2, 2, 1])
     i = chest << p

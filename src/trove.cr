@@ -387,10 +387,10 @@ module Trove
 
     def push(i : Oid, p : String, os : AA)
       p = pad p
-      lp = ((last i, p).not_nil![0] rescue "#{p}.0")
+      lp = ((last i, p).not_nil![0] rescue "#{p}.")
       pp = lp.rpartition '.'
       b = pp[0]
-      f = pp[2].to_u32 + 1
+      f = (pp[2].to_u32 + 1 rescue 0)
       u = Set(String | Int64 | Float64 | Bool | Nil).new
       transaction do |ttx|
         os.each_with_index do |o, n|
