@@ -164,7 +164,8 @@ describe Trove do
   it "can push simple elements to root array" do
     p = JSON.parse (0..10).map { |n| n }.to_json
     i = chest << p
-    chest.push i, "", [p]
+    pi = chest.push i, "", [p]
+    pi.should eq 11
     chest.get(i, "11").should eq p
     chest.delete i
   end
@@ -172,7 +173,8 @@ describe Trove do
   it "can push simple elements to non-root array" do
     p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
     i = chest << p
-    chest.push i, "l", [p]
+    pi = chest.push i, "l", [p]
+    pi.should eq 11
     chest.get(i, "l.11").should eq p
     chest.delete i
   end
@@ -180,7 +182,8 @@ describe Trove do
   it "can push complex elements to root array" do
     p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
     i = chest << p
-    chest.push i, "", [p]
+    pi = chest.push i, "", [p]
+    pi.should eq 11
     chest.get(i, "11").should eq p
     chest.delete i
   end
@@ -188,7 +191,8 @@ describe Trove do
   it "can push complex elements to non-root array" do
     p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
     i = chest << p
-    chest.push i, "l", [p]
+    pi = chest.push i, "l", [p]
+    pi.should eq 11
     chest.get(i, "l.11").should eq p
     chest.delete i
   end
@@ -203,7 +207,7 @@ describe Trove do
   it "do not push repeated elements to arrays" do
     p = JSON.parse (1..3).map { |n| n }.to_json
     i = chest << p
-    chest.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }
+    (chest.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }).should eq 3
     chest.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
     chest.delete i
   end

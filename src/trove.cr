@@ -405,6 +405,7 @@ module Trove
           (ttx.set i, np, o.raw, IndexBatch.new i, ttx).add
         end
       end
+      f
     end
 
     def has_key?(i : Oid, p : String = "")
