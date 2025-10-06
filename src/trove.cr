@@ -367,30 +367,30 @@ module Trove
       p.gsub(/\b(\d{10})\b/) { (r = $1.lstrip '0').empty? ? "0" : r }
     end
 
-    def first(i : Oid, p : String = "")
+    def first(i : Oid, p : String = "") : {String, A}?
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: "#{p}."}) do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
         rp = unpad d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10]
-        return {rp, get i, rp}
+        return {rp, (get i, rp).not_nil!}
       end
     end
 
-    def last(i : Oid, p : String = "")
+    def last(i : Oid, p : String = "") : {String, A}?
       p = pad p
       @env.from({di0: i.value[0], di1: i.value[1], dp: p.empty? ? "9" : "#{p}.9"}, "<=") do |d|
         break unless {d[:di0], d[:di1]} == i.value && d[:dp].starts_with? p
         rp = unpad d[:dp][..(p.empty? ? p.size - 1 : p.size) + 10]
-        return {rp, get i, rp}
+        return {rp, (get i, rp).not_nil!}
       end
     end
 
-    def push(i : Oid, p : String, os : AA)
+    def push(i : Oid, p : String, os : AA) : UInt32
       p = pad p
       lp = ((last i, p).not_nil![0] rescue "#{p}.")
       pp = lp.rpartition '.'
       b = pp[0]
-      f = (pp[2].to_u32 + 1 rescue 0)
+      f = (pp[2].to_u32 + 1 rescue 0_u32)
       u = Set(String | Int64 | Float64 | Bool | Nil).new
       transaction do |ttx|
         os.each_with_index do |o, n|
