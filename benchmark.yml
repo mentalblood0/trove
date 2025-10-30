@@ -9,40 +9,47 @@ chest:
         max_element_size: 65536
       index:
         path: /tmp/trove/paths_to_values/index.idx
-        cache_size: 128MB
+        cache_size: 0MB
   index:
     database:
       log:
         path: /tmp/trove/index/log.dat
       tables:
-      # TAG_TO_OBJECT
+      # TAG_AND_OBJECT
       - key_size: 32
         value_size: 0
-        data_storage_path: /tmp/trove/index/tags_to_objects/data.dat
+        data_storage_path: /tmp/trove/index/tag_and_object/data.dat
         index:
-          path: /tmp/trove/index/tags_to_objects/index.idx
-          cache_size: 32MB
-      # OBJECT_TO_TAG
+          path: /tmp/trove/index/tag_and_object/index.idx
+          cache_size: 0MB
+      # OBJECT_AND_TAG
       - key_size: 32
         value_size: 0
-        data_storage_path: /tmp/trove/index/objects_to_tags/data.dat
+        data_storage_path: /tmp/trove/index/object_and_tag/data.dat
         index:
-          path: /tmp/trove/index/objects_to_tags/index.idx
-          cache_size: 32MB
-      # ID_TO_SOURCE
+          path: /tmp/trove/index/object_and_tag/index.idx
+          cache_size: 0MB
+      # IDS_TO_SOURCES
       - data_storage:
           dir: /tmp/trove/index/ids_to_sources
           max_element_size: 65536
         index:
           path: /tmp/trove/index/ids_to_sources/index.idx
-          cache_size: 128MB
+          cache_size: 0MB
       # TAG_TO_OBJECTS_COUNT
       - key_size: 16
         value_size: 4
-        data_storage_path: /tmp/trove/index/tags_counts/data.dat
+        data_storage_path: /tmp/trove/index/tag_to_objects_count/data.dat
         index:
-          path: /tmp/trove/index/tags_counts/index.idx
-          cache_size: 20MB
+          path: /tmp/trove/index/tag_to_objects_count/index.idx
+          cache_size: 0MB
+      # OBJECT_TO_TAGS_COUNT
+      - key_size: 16
+        value_size: 4
+        data_storage_path: /tmp/trove/index/object_to_tags_count/data.dat
+        index:
+          path: /tmp/trove/index/object_to_tags_count/index.idx
+          cache_size: 0MB
 benchmarks:
 - in-memory
 - on-disk
