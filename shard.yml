@@ -5,8 +5,8 @@ authors:
   - mentalblood0 <necheporenko.stepan@yandex.ru>
 
 dependencies:
-  sophia:
-    github: mentalblood0/sophia
+  lawn:
+    github: mentalblood0/lawn
   xxhash128:
     github: mentalblood0/xxhash128
   dream:
