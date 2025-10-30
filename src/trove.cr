@@ -512,5 +512,10 @@ module Trove
       yield result
       result.commit
     end
+
+    def checkpoint
+      @database.checkpoint
+      @index.database.checkpoint
+    end
   end
 end
