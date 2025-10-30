@@ -328,7 +328,7 @@ module Trove
       case raw_value = value.raw
       when Bool, Float64, Int64, String, Nil
         partitioned_path = PartitionedPath.from_path path
-        return if (path_index = partitioned_path.index) && @index_transaction.has_tag? object_id.value, Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, encode raw_value).value
+        return if (path_index = partitioned_path.index) && @index_transaction.has_tag? Dream::Id.new(object_id.value), Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, encode raw_value).value
       end
       deletei object_id, path if has_key! object_id, path
       set(object_id, path, raw_value, IndexBatch.new object_id, self, :add).flush
@@ -414,7 +414,7 @@ module Trove
           next if unique_values.includes? raw_value
           unique_values << raw_value
           partitioned_new_path = PartitionedPath.from_path new_path
-          next if @index_transaction.has_tag? object_id.value, Dream::Id.new Digest.of_path_and_encoded_value(partitioned_new_path.base, encode raw_value).value
+          next if @index_transaction.has_tag? Dream::Id.new(object_id.value), Dream::Id.new Digest.of_path_and_encoded_value(partitioned_new_path.base, encode raw_value).value
         end
         set(object_id, new_path, raw_value, IndexBatch.new object_id, self, :add).flush
       end
@@ -496,6 +496,11 @@ module Trove
     getter index : Dream::Index
 
     def initialize(@database, @index)
+    end
+
+    def clear
+      @database.clear
+      @index.clear
     end
 
     def transaction

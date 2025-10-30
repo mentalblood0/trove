@@ -13,6 +13,8 @@ alias Config = {chest: Trove::Chest}
 config = Config.from_yaml File.read ENV["SPEC_CONFIG_PATH"]
 chest = config[:chest]
 
+Spec.after_each { chest.clear }
+
 describe Trove do
   it "example" do
     parsed = JSON.parse %({
@@ -113,20 +115,6 @@ describe Trove do
       transaction.where([{"dict", false}]).should eq [] of Trove::ObjectId
     end
   end
-
-  # it "cancels transaction on exception in transaction block" do
-  #   s = transaction.get(object_id, "dict").not_nil!
-  #   begin
-  #     transaction do |tx|
-  #       tx.delete object_id, "dict"
-  #       raise "oh no"
-  #       tx << s
-  #     end
-  #   rescue ex
-  #     ex.message.should eq "oh no"
-  #     chest.get(object_id, "dict").should eq s
-  #   end
-  # end
 
   it "can get indexes of simple elements of root array" do
     p = JSON.parse (0..10).map { |n| n }.to_json
@@ -230,7 +218,7 @@ describe Trove do
     end
   end
 
-  it "can push to empty array", focus: true do
+  it "can push to empty array" do
     p = JSON::Any.new 11
     i = Trove::ObjectId.random
     chest.transaction do |transaction|
@@ -254,7 +242,7 @@ describe Trove do
     p = JSON.parse (1..3).map { |n| n }.to_json
     chest.transaction do |transaction|
       i = transaction << p
-      (transaction.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }).should eq 3
+      transaction.push(i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }).should eq 3
       transaction.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
       transaction.delete i
     end
