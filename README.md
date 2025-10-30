@@ -1,6 +1,6 @@
 # 🏴‍☠️ trove
 
-Arbitrary JSON-structured data, all-indexing storage backed with [Sophia](https://github.com/pmwkaa/sophia)
+Arbitrary JSON-structured data, all-indexing storage backed with [lawn](https://github.com/mentalblood0/lawn)
 
 ## Installation
 
