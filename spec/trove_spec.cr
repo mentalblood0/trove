@@ -31,341 +31,384 @@ describe Trove do
       transaction.get(object_id, "dict").should eq parsed["dict"]
       transaction.get(object_id, "dict.hello").should eq parsed["dict"]["hello"]
       transaction.get(object_id, "dict.boolean").should eq parsed["dict"]["boolean"]
+
+      # get! is faster than get, but expects simple value
+      # because under the hood all values in trove are simple
+      # and get! just gets value by key, without range scan
+
+      transaction.get!(object_id, "dict.boolean").should eq parsed["dict"]["boolean"]
+      transaction.get!(object_id, "dict").should eq nil
+      transaction.get!(object_id, "dict.hello.0").should eq parsed["dict"]["hello"][0]
+      transaction.get!(object_id, "dict.hello.1").should eq parsed["dict"]["hello"][1]
+      transaction.get!(object_id, "dict.hello.2").should eq parsed["dict"]["hello"][2]
+      transaction.get!(object_id, "dict.hello.3").should eq parsed["dict"]["hello"][3]
+      transaction.get!(object_id, "null").should eq nil
+      transaction.get!(object_id, "nonexistent.key").should eq nil
+      transaction.get(object_id, "array").should eq parsed["array"]
+      transaction.get!(object_id, "array.0").should eq parsed["array"][0]
+      transaction.get(object_id, "array.1").should eq parsed["array"][1]
+      transaction.get!(object_id, "array.1.0").should eq parsed["array"][1][0]
+      transaction.get!(object_id, "array.1.1").should eq parsed["array"][1][1]
+      transaction.get(object_id, "array.2").should eq parsed["array"][2]
+      transaction.get!(object_id, "array.2.0").should eq parsed["array"][2][0]
+
+      transaction.has_key?(object_id, "null").should eq true
+      transaction.has_key!(object_id, "null").should eq true
+      transaction.has_key?(object_id, "dict").should eq true
+      transaction.has_key!(object_id, "dict").should eq false
+      transaction.has_key?(object_id, "nonexistent.key").should eq false
+      transaction.has_key!(object_id, "nonexistent.key").should eq false
+
+      transaction.objects.should eq [{object_id, parsed}]
+
+      # indexes accept multiple present as well as multiple absent fields
+
+      transaction.where([{"dict.boolean", false}]).should eq [object_id]
+      transaction.where([{"dict.boolean", true}]).should eq [] of Trove::ObjectId
+      transaction.where([{"dict.hello", "number"}]).should eq [object_id]
+      transaction.where([{"dict.boolean", false},
+                         {"dict.hello", "number"}]).should eq [object_id]
+      transaction.where([{"dict.boolean", true},
+                         {"dict.hello", "number"}]).should eq [] of Trove::ObjectId
+      transaction.where([{"dict.boolean", false}], [{"dict.hello", "number"}]).should eq [] of Trove::ObjectId
+      transaction.where([{"dict.boolean", false}], [{"dict.hello", "lalala"}]).should eq [object_id]
+
+      transaction.delete! object_id, "dict.hello"
+      transaction.get(object_id, "dict.hello").should eq ["number", 42, -4.2, 0.0]
+
+      transaction.delete! object_id, "dict.hello.2"
+      transaction.get(object_id, "dict.hello.2").should eq nil
+      transaction.get(object_id, "dict.hello").should eq ["number", 42, 0.0]
+      transaction.where([{"dict.hello", -4.2}]).should eq [] of Trove::ObjectId
+
+      transaction.delete object_id, "dict.hello"
+      transaction.get(object_id, "dict.hello").should eq nil
+      transaction.get(object_id, "dict").should eq({"boolean" => false})
+
+      transaction.delete! object_id, "dict.boolean"
+      transaction.where([{"dict.boolean", false}]).should eq [] of Trove::ObjectId
+      transaction.get(object_id, "dict").should eq nil
+      transaction.get(object_id).should eq({"null" => nil, "array" => [1, ["two", false], [nil]]})
+
+      transaction.set object_id, "dict", parsed["dict"]
+      transaction.get(object_id, "dict").should eq parsed["dict"]
+      transaction.set object_id, "dict.boolean", JSON.parse %({"a": "b", "c": 4})
+      transaction.get(object_id, "dict.boolean").should eq({"a" => "b", "c" => 4})
+
+      # set! works when overwriting simple values
+
+      transaction.set! object_id, "dict.null", parsed["array"]
+      transaction.get(object_id, "dict.null").should eq parsed["array"]
+
+      transaction.delete object_id
+      transaction.get(object_id).should eq nil
+      transaction.get(object_id, "null").should eq nil
+
+      transaction.set object_id, "", parsed
+
+      transaction.delete object_id
+      transaction.get(object_id).should eq nil
+      transaction.get(object_id, "null").should eq nil
+      transaction.where([{"dict.boolean", false}]).should eq [] of Trove::ObjectId
+      transaction.where([{"dict", false}]).should eq [] of Trove::ObjectId
     end
+  end
 
-    #   # get! is faster than get, but expects simple value
-    #   # because under the hood all values in trove are simple
-    #   # and get! just gets value by key, without range scan
+  # it "cancels transaction on exception in transaction block" do
+  #   s = transaction.get(object_id, "dict").not_nil!
+  #   begin
+  #     transaction do |tx|
+  #       tx.delete object_id, "dict"
+  #       raise "oh no"
+  #       tx << s
+  #     end
+  #   rescue ex
+  #     ex.message.should eq "oh no"
+  #     chest.get(object_id, "dict").should eq s
+  #   end
+  # end
 
-    #   chest.get!(oid, "dict.boolean").should eq parsed["dict"]["boolean"]
-    #   chest.get!(oid, "dict").should eq nil
-    #   chest.get!(oid, "dict.hello.0").should eq parsed["dict"]["hello"][0]
-    #   chest.get!(oid, "dict.hello.1").should eq parsed["dict"]["hello"][1]
-    #   chest.get!(oid, "dict.hello.2").should eq parsed["dict"]["hello"][2]
-    #   chest.get!(oid, "dict.hello.3").should eq parsed["dict"]["hello"][3]
-    #   chest.get!(oid, "null").should eq nil
-    #   chest.get!(oid, "nonexistent.key").should eq nil
-    #   chest.get(oid, "array").should eq parsed["array"]
-    #   chest.get!(oid, "array.0").should eq parsed["array"][0]
-    #   chest.get(oid, "array.1").should eq parsed["array"][1]
-    #   chest.get!(oid, "array.1.0").should eq parsed["array"][1][0]
-    #   chest.get!(oid, "array.1.1").should eq parsed["array"][1][1]
-    #   chest.get(oid, "array.2").should eq parsed["array"][2]
-    #   chest.get!(oid, "array.2.0").should eq parsed["array"][2][0]
+  it "can get indexes of simple elements of root array" do
+    p = JSON.parse (0..10).map { |n| n }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      (0..10).each { |n| transaction.index_of(i, "", n.to_i64).should eq n.to_u32 }
+      transaction.delete i
+    end
+  end
 
-    #   chest.has_key?(oid, "null").should eq true
-    #   chest.has_key!(oid, "null").should eq true
-    #   chest.has_key?(oid, "dict").should eq true
-    #   chest.has_key!(oid, "dict").should eq false
-    #   chest.has_key?(oid, "nonexistent.key").should eq false
-    #   chest.has_key!(oid, "nonexistent.key").should eq false
+  it "can get indexes of simple elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      (0..10).each { |n| transaction.index_of(i, "l", n.to_i64).should eq n.to_u32 }
+      transaction.delete i
+    end
+  end
 
-    #   chest.objects.should eq [{oid, parsed}]
+  it "can get first and last simple elements of root array" do
+    p = JSON.parse (0..10).map { |n| n }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.first(i, "").should eq({"0", 0})
+      transaction.last(i, "").should eq({"10", 10})
+      transaction.delete i
+    end
+  end
 
-    #   # indexes accept multiple present as well as multiple absent fields
+  it "can get first and last simple elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.first(i, "l").should eq({"l.0", 0})
+      transaction.last(i, "l").should eq({"l.10", 10})
+      transaction.delete i
+    end
+  end
 
-    #   chest.where({"dict.boolean" => false}).should eq [oid]
-    #   chest.where({"dict.boolean" => true}).should eq [] of Trove::Oid
-    #   chest.where({"dict.hello" => "number"}).should eq [oid]
-    #   chest.where({"dict.boolean" => false,
-    #                "dict.hello"   => "number"}).should eq [oid]
-    #   chest.where({"dict.boolean" => true,
-    #                "dict.hello"   => "number"}).should eq [] of Trove::Oid
-    #   chest.where({"dict.boolean" => false}, {"dict.hello" => "number"}).should eq [] of Trove::Oid
-    #   chest.where({"dict.boolean" => false}, {"dict.hello" => "lalala"}).should eq [oid]
+  it "can get first and last complex elements of root array" do
+    p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.first(i, "").should eq({"0", {"n" => 0}})
+      transaction.last(i, "").should eq({"10", {"n" => 10}})
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete! oid, "dict.hello"
-    #   chest.get(oid, "dict.hello").should eq ["number", 42, -4.2, 0.0]
+  it "can get first and last complex elements of non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.first(i, "l").should eq({"l.0", {"n" => 0}})
+      transaction.last(i, "l").should eq({"l.10", {"n" => 10}})
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete! oid, "dict.hello.2"
-    #   chest.get(oid, "dict.hello.2").should eq nil
-    #   chest.get(oid, "dict.hello").should eq ["number", 42, 0.0]
-    #   chest.where({"dict.hello" => -4.2}).should eq [] of Trove::Oid
+  it "can push simple elements to root array" do
+    p = JSON.parse (0..10).map { |n| n }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      pi = transaction.push i, "", [p]
+      pi.should eq 11
+      transaction.get(i, "11").should eq p
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete oid, "dict.hello"
-    #   chest.get(oid, "dict.hello").should eq nil
-    #   chest.get(oid, "dict").should eq({"boolean" => false})
+  it "can push simple elements to non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      pi = transaction.push i, "l", [p]
+      pi.should eq 11
+      transaction.get(i, "l.11").should eq p
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete! oid, "dict.boolean"
-    #   chest.where({"dict.boolean" => false}).should eq [] of Trove::Oid
-    #   chest.get(oid, "dict").should eq nil
-    #   chest.get(oid).should eq({"null" => nil, "array" => [1, ["two", false], [nil]]})
+  it "can push complex elements to root array" do
+    p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      pi = transaction.push i, "", [p]
+      pi.should eq 11
+      transaction.get(i, "11").should eq p
+      transaction.delete i
+    end
+  end
 
-    #   chest.set oid, "dict", parsed["dict"]
-    #   chest.get(oid, "dict").should eq parsed["dict"]
-    #   chest.set oid, "dict.boolean", JSON.parse %({"a": "b", "c": 4})
-    #   chest.get(oid, "dict.boolean").should eq({"a" => "b", "c" => 4})
+  it "can push complex elements to non-root array" do
+    p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      pi = transaction.push i, "l", [p]
+      pi.should eq 11
+      transaction.get(i, "l.11").should eq p
+      transaction.delete i
+    end
+  end
 
-    #   # set! works when overwriting simple values
+  it "can push to empty array", focus: true do
+    p = JSON::Any.new 11
+    i = Trove::ObjectId.random
+    chest.transaction do |transaction|
+      pi = transaction.push i, "", [p]
+      pi.should eq 0
+      transaction.get(i, "0").should eq p
+      transaction.delete i
+    end
+  end
 
-    #   chest.set! oid, "dict.null", parsed["array"]
-    #   chest.get(oid, "dict.null").should eq parsed["array"]
+  it "do not add repeated elements when adding arrays" do
+    p = JSON.parse %([2, 2, 1])
+    chest.transaction do |transaction|
+      i = transaction << p
+      (transaction.get i).should eq JSON.parse [2, 1].to_json
+      transaction.delete i
+    end
+  end
 
-    #   s = chest.get(oid, "dict").not_nil!
-    #   begin
-    #     chest.transaction do |tx|
-    #       tx.delete oid, "dict"
-    #       raise "oh no"
-    #       tx << s
-    #     end
-    #   rescue ex
-    #     ex.message.should eq "oh no"
-    #     chest.get(oid, "dict").should eq s
-    #   end
+  it "do not push repeated elements to arrays" do
+    p = JSON.parse (1..3).map { |n| n }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      (transaction.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }).should eq 3
+      transaction.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete oid
-    #   chest.get(oid).should eq nil
-    #   chest.get(oid, "null").should eq nil
+  it "do not set! repeated elements to arrays" do
+    p = JSON.parse (1..3).map { |n| n }.to_json
+    chest.transaction do |transaction|
+      i = transaction << p
+      [1, 20, 3, 20].each_with_index { |n, nn| transaction.set! i, (3 + nn).to_s, JSON::Any.new n }
+      transaction.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
+      transaction.delete i
+    end
+  end
 
-    #   chest.set oid, "", parsed
+  it "supports dots in keys" do
+    p = JSON.parse %({"a.b.c": 1})
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.get(i).should eq p
+      transaction.delete i
+    end
+  end
 
-    #   chest.delete oid
-    #   chest.get(oid).should eq nil
-    #   chest.get(oid, "null").should eq nil
-    #   chest.where({"dict.boolean" => false}).should eq [] of Trove::Oid
-    #   chest.where({"dict" => false}).should eq [] of Trove::Oid
-    # end
+  it "supports removing first array element" do
+    p = JSON.parse %(["a", "b", "c"])
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.delete! i, "0"
+      transaction.get(i).should eq ["b", "c"]
+      transaction.set! i, "k", JSON.parse %("a")
+      transaction.get(i).should eq({"k" => "a", "1" => "b", "2" => "c"})
+      transaction.delete i
+    end
+  end
 
-    # it "can get indexes of simple elements of root array" do
-    #   p = JSON.parse (0..10).map { |n| n }.to_json
-    #   i = chest << p
-    #   (0..10).each { |n| chest.index(i, "", n.to_i64).should eq n.to_u32 }
-    #   chest.delete i
-    # end
+  it "supports indexing large values" do
+    size = 2 ** 16
+    v = ["a" * size]
+    j = v.to_json
+    p = JSON.parse j
+    chest.transaction do |transaction|
+      i = transaction << p
+      transaction.where([{"", v.first}]).should eq [i]
+      transaction.get(i).should eq v
+      transaction.delete i
+    end
+  end
 
-    # it "can get indexes of simple elements of non-root array" do
-    #   p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
-    #   i = chest << p
-    #   (0..10).each { |n| chest.index(i, "l", n.to_i64).should eq n.to_u32 }
-    #   chest.delete i
-    # end
+  it "distinguishes in key/value pairs with same concatenation result" do
+    chest.transaction do |transaction|
+      i0 = transaction << JSON.parse %({"as": "a"})
+      i1 = transaction << JSON.parse %({"a": "sa"})
+      transaction.where([{"as", "a"}]).should eq [i0]
+      transaction.where([{"a", "sa"}]).should eq [i1]
+      transaction.delete i0
+      transaction.delete i1
+    end
+  end
 
-    # it "can get first and last simple elements of root array" do
-    #   p = JSON.parse (0..10).map { |n| n }.to_json
-    #   i = chest << p
-    #   chest.first(i, "").should eq({"0", 0})
-    #   chest.last(i, "").should eq({"10", 10})
-    #   chest.delete i
-    # end
+  it "can dump and load data" do
+    # dump is gzip compressed json lines of format
+    # {"object_id": <object identifier>, "data": <object>}
 
-    # it "can get first and last simple elements of non-root array" do
-    #   p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
-    #   i = chest << p
-    #   chest.first(i, "l").should eq({"l.0", 0})
-    #   chest.last(i, "l").should eq({"l.10", 10})
-    #   chest.delete i
-    # end
+    o0 = {"a" => "b"}
+    o1 = COMPLEX_STRUCTURE
+    dump = IO::Memory.new
+    chest.transaction do |transaction|
+      i0 = transaction << JSON.parse o0.to_json
+      i1 = transaction << JSON.parse o1.to_json
+      transaction.dump dump
+      transaction.delete i0
+      transaction.delete i1
+      transaction.get(i0).should eq nil
+      transaction.get(i1).should eq nil
 
-    # it "can get first and last complex elements of root array" do
-    #   p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
-    #   i = chest << p
-    #   chest.first(i, "").should eq({"0", {"n" => 0}})
-    #   chest.last(i, "").should eq({"10", {"n" => 10}})
-    #   chest.delete i
-    # end
+      dump.rewind
+      transaction.load dump
 
-    # it "can get first and last complex elements of non-root array" do
-    #   p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
-    #   i = chest << p
-    #   chest.first(i, "l").should eq({"l.0", {"n" => 0}})
-    #   chest.last(i, "l").should eq({"l.10", {"n" => 10}})
-    #   chest.delete i
-    # end
+      (Set.new transaction.objects).should eq Set.new [{i0, o0}, {i1, o1}]
+      transaction.get(i0).should eq o0
+      transaction.get(i1).should eq o1
+      transaction.delete i0
+      transaction.delete i1
+    end
+  end
 
-    # it "can push simple elements to root array" do
-    #   p = JSON.parse (0..10).map { |n| n }.to_json
-    #   i = chest << p
-    #   pi = chest.push i, "", [p]
-    #   pi.should eq 11
-    #   chest.get(i, "11").should eq p
-    #   chest.delete i
-    # end
+  it "correctly gets arrays with >9 elements" do
+    chest.transaction do |transaction|
+      o = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+      i = transaction << JSON.parse o.to_json
+      transaction.get(i).should eq o
+      transaction.delete i
+    end
+  end
 
-    # it "can push simple elements to non-root array" do
-    #   p = JSON.parse ({"l" => (0..10).map { |n| n }}).to_json
-    #   i = chest << p
-    #   pi = chest.push i, "l", [p]
-    #   pi.should eq 11
-    #   chest.get(i, "l.11").should eq p
-    #   chest.delete i
-    # end
+  [
+    "string",
+    1234_i64,
+    1234.1234_f64,
+    -1234_i64,
+    -1234.1234_f64,
+    0_i64,
+    0.0_f64,
+    true,
+    false,
+    nil,
+    {"key" => "value"},
+    {"a" => "b", "c" => "d"},
+    {"a" => {"b" => "c"}},
+    {"a" => {"b" => {"c" => "d"}}},
+    {"a" => {"b" => {"c" => "d"}}},
+    ["a", "b", "c"],
+    ["a"],
+    [1_i64, 2_i64, 3_i64],
+    [1_i64],
+    ["a", 1_i64, true, 0.0_f64],
+    COMPLEX_STRUCTURE,
+  ].each do |o|
+    it "add+get+where+delete #{o}" do
+      j = o.to_json
+      p = JSON.parse j
 
-    # it "can push complex elements to root array" do
-    #   p = JSON.parse (0..10).map { |n| {"n" => n} }.to_json
-    #   i = chest << p
-    #   pi = chest.push i, "", [p]
-    #   pi.should eq 11
-    #   chest.get(i, "11").should eq p
-    #   chest.delete i
-    # end
+      chest.transaction do |transaction|
+        i = transaction << p
+        transaction.get(i).should eq o
 
-    # it "can push complex elements to non-root array" do
-    #   p = JSON.parse ({"l" => (0..10).map { |n| {"n" => n} }}).to_json
-    #   i = chest << p
-    #   pi = chest.push i, "l", [p]
-    #   pi.should eq 11
-    #   chest.get(i, "l.11").should eq p
-    #   chest.delete i
-    # end
+        transaction.has_key?(i).should eq true
 
-    # it "can push to empty array", focus: true do
-    #   p = JSON::Any.new 11
-    #   i = Trove::Oid.random
-    #   pi = chest.push i, "", [p]
-    #   pi.should eq 0
-    #   chest.get(i, "0").should eq p
-    #   chest.delete i
-    # end
+        case o
+        when String, Int64, Float64, Bool, Nil
+          transaction.where([{"", o}]).should eq [i]
+          transaction.has_key!(i).should eq true
+        when Array
+          o.each_with_index do |v, k|
+            transaction.has_key!(i, k.to_s).should eq true
+            transaction.where([{"", v}]).should eq [i]
+          end
+        when Hash(String, String)
+          o.each do |k, v|
+            transaction.has_key!(i, k).should eq true
+            transaction.where([{k.to_s, v}]).should eq [i]
+          end
+        when COMPLEX_STRUCTURE
+          transaction.has_key!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq true
+          transaction.get(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
+          transaction.get!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
+          transaction.where([{"level1.level2.level3.1.metadata.level4.level5.level6.note", "This is six levels deep"}]).should eq [i]
+        end
 
-    # it "do not add repeated elements when adding arrays" do
-    #   p = JSON.parse %([2, 2, 1])
-    #   i = chest << p
-    #   (chest.get i).should eq JSON.parse [2, 1].to_json
-    #   chest.delete i
-    # end
-
-    # it "do not push repeated elements to arrays" do
-    #   p = JSON.parse (1..3).map { |n| n }.to_json
-    #   i = chest << p
-    #   (chest.push i, "", [1, 20, 3, 20].map { |n| JSON::Any.new n }).should eq 3
-    #   chest.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
-    #   chest.delete i
-    # end
-
-    # it "do not set! repeated elements to arrays" do
-    #   p = JSON.parse (1..3).map { |n| n }.to_json
-    #   i = chest << p
-    #   [1, 20, 3, 20].each_with_index { |n, nn| chest.set! i, (3 + nn).to_s, JSON::Any.new n }
-    #   chest.get(i, "").should eq JSON::Any.new [1, 2, 3, 20].map { |n| JSON::Any.new n }
-    #   chest.delete i
-    # end
-
-    # it "supports dots in keys" do
-    #   p = JSON.parse %({"a.b.c": 1})
-    #   i = chest << p
-    #   chest.get(i).should eq p
-    #   chest.delete i
-    # end
-
-    # it "supports removing first array element" do
-    #   p = JSON.parse %(["a", "b", "c"])
-    #   i = chest << p
-    #   chest.delete! i, "0"
-    #   chest.get(i).should eq ["b", "c"]
-    #   chest.set! i, "k", JSON.parse %("a")
-    #   chest.get(i).should eq({"k" => "a", "1" => "b", "2" => "c"})
-    #   chest.delete i
-    # end
-
-    # it "supports indexing large values" do
-    #   size = 2 ** 16
-    #   v = ["a" * size]
-    #   j = v.to_json
-    #   p = JSON.parse j
-    #   i = chest << p
-    #   chest.where({"" => v.first}).should eq [i]
-    #   chest.get(i).should eq v
-    #   chest.delete i
-    # end
-
-    # it "distinguishes in key/value pairs with same concatenation result" do
-    #   i0 = chest << JSON.parse %({"as": "a"})
-    #   i1 = chest << JSON.parse %({"a": "sa"})
-    #   chest.where({"as" => "a"}).should eq [i0]
-    #   chest.where({"a" => "sa"}).should eq [i1]
-    #   chest.delete i0
-    #   chest.delete i1
-    # end
-
-    # it "can dump and load data" do
-    #   # dump is gzip compressed json lines of format
-    #   # {"oid": <object identifier>, "data": <object>}
-
-    #   o0 = {"a" => "b"}
-    #   o1 = COMPLEX_STRUCTURE
-    #   i0 = chest << JSON.parse o0.to_json
-    #   i1 = chest << JSON.parse o1.to_json
-
-    #   dump = IO::Memory.new
-    #   chest.dump dump
-
-    #   chest.delete i0
-    #   chest.delete i1
-    #   chest.get(i0).should eq nil
-    #   chest.get(i1).should eq nil
-
-    #   dump.rewind
-    #   chest.load dump
-
-    #   (Set.new chest.objects).should eq Set.new [{i0, o0}, {i1, o1}]
-    #   chest.get(i0).should eq o0
-    #   chest.get(i1).should eq o1
-    #   chest.delete i0
-    #   chest.delete i1
-    # end
-
-    # it "correctly gets arrays with >9 elements" do
-    #   o = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    #   i = chest << JSON.parse o.to_json
-    #   chest.get(i).should eq o
-    #   chest.delete i
-    # end
-
-    # [
-    #   "string",
-    #   1234_i64,
-    #   1234.1234_f64,
-    #   -1234_i64,
-    #   -1234.1234_f64,
-    #   0_i64,
-    #   0.0_f64,
-    #   true,
-    #   false,
-    #   nil,
-    #   {"key" => "value"},
-    #   {"a" => "b", "c" => "d"},
-    #   {"a" => {"b" => "c"}},
-    #   {"a" => {"b" => {"c" => "d"}}},
-    #   {"a" => {"b" => {"c" => "d"}}},
-    #   ["a", "b", "c"],
-    #   ["a"],
-    #   [1_i64, 2_i64, 3_i64],
-    #   [1_i64],
-    #   ["a", 1_i64, true, 0.0_f64],
-    #   COMPLEX_STRUCTURE,
-    # ].each do |o|
-    #   it "add+get+where+delete #{o}" do
-    #     j = o.to_json
-    #     p = JSON.parse j
-    #     i = chest << p
-    #     chest.get(i).should eq o
-
-    #     chest.has_key?(i).should eq true
-
-    #     case o
-    #     when String, Int64, Float64, Bool, Nil
-    #       chest.where({"" => o}).should eq [i]
-    #       chest.has_key!(i).should eq true
-    #     when Array
-    #       o.each_with_index do |v, k|
-    #         chest.has_key!(i, k.to_s).should eq true
-    #         chest.where({"" => v}).should eq [i]
-    #       end
-    #     when Hash(String, String)
-    #       o.each do |k, v|
-    #         chest.has_key!(i, k).should eq true
-    #         chest.where({k.to_s => v}).should eq [i]
-    #       end
-    #     when COMPLEX_STRUCTURE
-    #       chest.has_key!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq true
-    #       chest.get(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
-    #       chest.get!(i, "level1.level2.level3.1.metadata.level4.level5.level6.note").should eq "This is six levels deep"
-    #       chest.where({"level1.level2.level3.1.metadata.level4.level5.level6.note" => "This is six levels deep"}).should eq [i]
-    #     end
-
-    #     chest.delete i
-    #     chest.has_key!(i).should eq false
-    #     chest.get(i).should eq nil
-    #   end
+        transaction.delete i
+        transaction.has_key!(i).should eq false
+        transaction.get(i).should eq nil
+      end
+    end
   end
 end

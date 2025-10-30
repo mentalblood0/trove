@@ -22,15 +22,11 @@ module Trove
     end
 
     def self.random
-      uuid = UUID.v7.bytes.to_slice
-      result_value = Bytes.new 16
-      IO::ByteFormat::BigEndian.encode uuid[0], result_value[0..7]
-      IO::ByteFormat::BigEndian.encode uuid[1], result_value[8..15]
-      self.new result_value
+      self.new UUID.v7.bytes.to_slice.clone
     end
 
-    def self.from_string(s : String)
-      from_bytes s.hexbytes
+    def self.from_string(string : String)
+      self.new string.hexbytes
     end
 
     def string
@@ -85,12 +81,12 @@ module Trove
     end
 
     macro yield_object
-      if flat.size == 0
+      if flattened_object.size == 0
         yield({object_id, A.new nil})
-      elsif flat.has_key? ""
-        yield({object_id, flat[""]})
+      elsif flattened_object.has_key? ""
+        yield({object_id, flattened_object[""]})
       else
-        yield({object_id, to_json_object A.new nest flat})
+        yield({object_id, to_json_object A.new nest flattened_object})
       end
     end
 
@@ -104,9 +100,9 @@ module Trove
             yield_object
             flattened_object.clear
           end
-          object_id = i
+          object_id = current_object_id
         end
-        current_path = current_object_id_and_path[16..]
+        current_path = String.new(current_object_id_and_path[16..])
         flattened_object[current_path] = A.new decode current_value
       end
       if object_id
@@ -120,12 +116,12 @@ module Trove
       result
     end
 
-    record DumpEntry, object_id : String, object : A
+    alias DumpEntry = {object_id: String, object: A}
 
     def dump(stream : IO)
       Compress::Gzip::Writer.open(stream, Compress::Deflate::BEST_COMPRESSION) do |compressor|
         objects do |object_id, object|
-          compressor.puts DumpEntry.new(object_id, object).to_json
+          compressor.puts({object_id: object_id.string, object: object}.to_json)
         end
       end
     end
@@ -134,8 +130,8 @@ module Trove
       Compress::Gzip::Reader.open(stream) do |decompressor|
         decompressor.each_line do |line|
           dump_entry = DumpEntry.from_json line.chomp
-          object_id = ObjectId.from_string dump_entry.object_id
-          set object_id, "", dump_entry.object
+          object_id = ObjectId.from_string dump_entry[:object_id]
+          set object_id, "", dump_entry[:object]
         end
       end
     end
@@ -218,8 +214,8 @@ module Trove
       getter transaction : Transaction
       getter type : Symbol
 
-      getter digests = [] of Bytes
-      getter array_digests = {} of Int32 => Array(Bytes)
+      getter digests = [] of Dream::Id
+      getter array_digests = {} of Int32 => Array(Dream::Id)
 
       def initialize(@object_id, @transaction, @type)
       end
@@ -227,33 +223,33 @@ module Trove
       def add(path : String, encoded_value : Bytes)
         partitioned_path = PartitionedPath.from_path path
         if path_index = partitioned_path.index
-          @digests << Digest.of_path_and_encoded_value(partitioned_path.base, encoded_value).value
-          @array_digests[path_index] = [] of Bytes unless @array_digests.has_key? path_index
-          @array_digests[path_index] << Digest.of_path_and_encoded_value(partitioned_path.base, @object_id.value + encoded_value).value
+          @digests << Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, encoded_value).value
+          @array_digests[path_index] = [] of Dream::Id unless @array_digests.has_key? path_index
+          @array_digests[path_index] << Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, @object_id.value + encoded_value).value
         else
-          @digests << Digest.of_path_and_encoded_value(path.to_slice, encoded_value).value
+          @digests << Dream::Id.new Digest.of_path_and_encoded_value(path.to_slice, encoded_value).value
         end
         self
       end
 
       def self.path_index_to_bytes(path_index : Int32)
-        result = Bytes.new 4
-        IO::ByteFormat::BigEndian.encode path_index, result
+        result = Bytes.new 16
+        IO::ByteFormat::BigEndian.encode path_index, result[-4..]
         result
       end
 
       def self.path_index_from_bytes(bytes : Bytes)
-        IO::ByteFormat::BigEndian.decode Int32, bytes
+        IO::ByteFormat::BigEndian.decode Int32, bytes[-4..]
       end
 
       def flush
         case @type
         when :add
-          @transaction.index_transaction.add @object_id.value, @digests
-          @array_digests.each { |path_index, path_index_paths_digests| @transaction.index_transaction.add(IndexBatch.path_index_to_bytes(path_index), path_index_paths_digests) }
+          @transaction.index_transaction.add Dream::Id.new(@object_id.value), @digests
+          @array_digests.each { |path_index, path_index_paths_digests| @transaction.index_transaction.add(Dream::Id.new(IndexBatch.path_index_to_bytes(path_index)), path_index_paths_digests) }
         when :delete
-          @transaction.index_transaction.delete @object_id.value, @digests
-          @array_digests.each { |path_index, path_index_paths_digests| @transaction.index_transaction.delete(IndexBatch.path_index_to_bytes(path_index), path_index_paths_digests) }
+          @transaction.index_transaction.delete Dream::Id.new(@object_id.value), @digests
+          @array_digests.each { |path_index, path_index_paths_digests| @transaction.index_transaction.delete(Dream::Id.new(IndexBatch.path_index_to_bytes(path_index)), path_index_paths_digests) }
         else raise Exception.new "Unsupported index batch type: #{@type}"
         end
         self
@@ -262,24 +258,28 @@ module Trove
 
     def where(present_pathvalues : Array({String, I}), absent_pathvalues : Array({String, I}) = [] of {String, I}, start_after_object : ObjectId? = nil, &)
       @index_transaction.find(
-        present_pathvalues.map { |path, value| Trove.digest pad(path), encode value },
-        absent_pathvalues.map { |path, value| Trove.digest pad(path), encode value },
-        start_after_object ? start_after_object.value : nil) { |dream_object_id| yield ObjectId.new dream_object_id.value }
+        present_pathvalues.map do |path, value|
+          Dream::Id.new Digest.of_path_and_encoded_value(pad(path).to_slice, encode value).value
+        end,
+        absent_pathvalues.map { |path, value| Dream::Id.new Digest.of_path_and_encoded_value(pad(path).to_slice, encode value).value },
+        start_after_object ? start_after_object.value : nil) do |dream_object_id|
+        yield ObjectId.new dream_object_id.value
+      end
     end
 
-    def where(present_pathvalues : Array({String, I}), absent_pathvalues : Array({String, I}) = [] of {String, I}, limit : Int32 = Int32::MAX, start_after_object : ObjectId? = nil, &)
+    def where(present_pathvalues : Array({String, I}), absent_pathvalues : Array({String, I}) = [] of {String, I}, limit : Int32 = Int32::MAX, start_after_object : ObjectId? = nil)
       result = [] of ObjectId
-      where(present_pathvalues, absent_pathvalues, limit, start_after_object) do |object_id|
+      where(present_pathvalues, absent_pathvalues, start_after_object) do |object_id|
         break if result.size >= limit
         result << object_id
       end
       result
     end
 
-    def index_of(object_id : ObjectId, path : String, value : I) : UInt32?
+    def index_of(object_id : ObjectId, path : String, value : I) : Int32?
       padded_path = pad path
-      partitioned_path = Trove.partition padded_path
-      @index_transaction.find([Digest.of_path_and_encoded_value partitioned_path.base, object_id.value + encode value]) { |path_index_bytes| return IndexBatch.path_index_from_bytes path_index_bytes }
+      partitioned_path = PartitionedPath.from_path padded_path
+      @index_transaction.find([Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, object_id.value + encode value).value]) { |path_index_bytes_as_dream_id| return IndexBatch.path_index_from_bytes path_index_bytes_as_dream_id.value }
     end
 
     protected def set(object_id : ObjectId, path : String, value : A::Type, index_batch : IndexBatch? = nil)
@@ -289,7 +289,6 @@ module Trove
           escaped_key = key.gsub ".", "\\."
           set object_id, path.empty? ? escaped_key : "#{path}.#{escaped_key}", internal_value.raw, index_batch
         end
-        index_batch
       when AA
         array_index = 0_u32
         unique_internal_values = Set(String | Int64 | Float64 | Bool | Nil).new
@@ -304,13 +303,12 @@ module Trove
           set object_id, path.empty? ? key : "#{path}.#{key}", internal_value, index_batch
           array_index += 1
         end
-        index_batch
       else
         encoded_value = encode value
         index_batch.add path, encoded_value if index_batch
         @database_transaction.set OBJECT_ID_AND_PATH_TO_VALUE, object_id.value + path.to_slice, encoded_value
-        index_batch
       end
+      index_batch
     end
 
     def set(object_id : ObjectId, path : String, value : A)
@@ -330,7 +328,7 @@ module Trove
       case raw_value = value.raw
       when Bool, Float64, Int64, String, Nil
         partitioned_path = PartitionedPath.from_path path
-        return if (path_index = partitioned_path.index) && @index_transaction.has_tag? object_id.value, Digest.of_path_and_encoded_value partitioned_path.base, encode raw_value
+        return if (path_index = partitioned_path.index) && @index_transaction.has_tag? object_id.value, Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, encode raw_value).value
       end
       deletei object_id, path if has_key! object_id, path
       set(object_id, path, raw_value, IndexBatch.new object_id, self, :add).flush
@@ -381,32 +379,33 @@ module Trove
     end
 
     def first(object_id : ObjectId, path : String = "") : {String, A}?
-      padded_path = pad p
+      padded_path = pad path
       @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + "#{padded_path}.".to_slice).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
         current_path = current_object_id_and_path[16..]
-        break unless current_object_id == object_id.value && String.new(current_path).starts_with? padded_path
-        result_path = unpad current_path[..(padded_path.empty? ? padded_path.size - 1 : padded_path.size) + 10]
+        break unless current_object_id == object_id && String.new(current_path).starts_with? padded_path
+        result_path = unpad String.new(current_path[..(padded_path.empty? ? padded_path.size - 1 : padded_path.size) + 10])
+        return {result_path, get(object_id, result_path).not_nil!}
       end
     end
 
     def last(object_id : ObjectId, path : String = "") : {String, A}?
       padded_path = pad path
-      @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + padded_path.empty? ? "9" : "#{padded_path}.9", direction: :backward).each_next do |current_object_id_and_path, current_value|
+      @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + (padded_path.empty? ? "9".to_slice : "#{padded_path}.9".to_slice), direction: :backward).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
         current_path = current_object_id_and_path[16..]
-        break unless current_object_id == object_id.value && String.new(current_path).starts_with? padded_path
-        result_path = unpad current_path[..(padded_path.empty? ? padded_path.size - 1 : padded_path.size) + 10]
+        break unless current_object_id == object_id && String.new(current_path).starts_with? padded_path
+        result_path = unpad String.new(current_path[..(padded_path.empty? ? padded_path.size - 1 : padded_path.size) + 10])
         return {result_path, get(object_id, result_path).not_nil!}
       end
     end
 
-    def push(object_id : ObjectId, path : String, values : AA) : UInt32
+    def push(object_id : ObjectId, path : String, values : AA) : Int32
       padded_path = pad path
       last_path = ((last object_id, padded_path).not_nil![0] rescue "#{padded_path}.")
       partitioned_last_path = last_path.rpartition '.'
-      base = partitioned_last_path.base
-      first_index = (partitioned_last_path.index.to_u32 + 1 rescue 0_u32)
+      base = partitioned_last_path[0]
+      first_index = (partitioned_last_path[2].to_i32 + 1 rescue 0_i32)
       unique_values = Set(String | Int64 | Float64 | Bool | Nil).new
       values.each_with_index do |value, value_local_index|
         new_path = "#{base.empty? ? "" : "#{base}."}#{(first_index + value_local_index).to_s.rjust 10, '0'}"
@@ -415,7 +414,7 @@ module Trove
           next if unique_values.includes? raw_value
           unique_values << raw_value
           partitioned_new_path = PartitionedPath.from_path new_path
-          next if @index_transaction.has_tag? object_id.value, Digest.of_path_and_encoded_value partitioned_new_path.base, encode raw_value
+          next if @index_transaction.has_tag? object_id.value, Dream::Id.new Digest.of_path_and_encoded_value(partitioned_new_path.base, encode raw_value).value
         end
         set(object_id, new_path, raw_value, IndexBatch.new object_id, self, :add).flush
       end
@@ -435,7 +434,7 @@ module Trove
 
     def has_key!(object_id : ObjectId, path : String = "") : Bool
       padded_path = pad path
-      @database_transaction.get(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + padded_path.to_slice) != nil
+      @database_transaction.get(OBJECT_ID_AND_PATH_TO_VALUE, object_id.value + padded_path.to_slice) != nil
     end
 
     def get(object_id : ObjectId, path : String = "")
@@ -480,7 +479,7 @@ module Trove
     def delete!(object_id : ObjectId, path : String = "")
       padded_path = pad path
       return unless has_key! object_id, padded_path
-      delete(object_id, padded_path, (@database_transaction.get OBJECT_ID_AND_PATH_TO_VALUE, object_id.value + padded_path.to_slice rescue return), IndexBatch.new object_id, self, :delete).flush
+      delete(object_id, padded_path, (@database_transaction.get(OBJECT_ID_AND_PATH_TO_VALUE, object_id.value + padded_path.to_slice).not_nil! rescue return), IndexBatch.new object_id, self, :delete).flush
     end
 
     def commit
