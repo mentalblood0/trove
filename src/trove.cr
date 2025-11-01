@@ -13,10 +13,14 @@ module Trove
 
   alias Encodable = String | Int64 | Float64 | Bool | Nil
 
+  class Exception < Exception
+  end
+
   struct ObjectId
     getter value : Bytes
 
     def initialize(@value)
+      raise Exception.new "Object id must be of size 16 bytes, not #{@value.size} bytes" unless @value.size == 16
     end
 
     def self.random
@@ -28,7 +32,7 @@ module Trove
     end
 
     def string
-      Base64.encode @value
+      Base64.encode(@value)[..-4]
     end
 
     def <=>(other : ObjectId)
@@ -40,6 +44,7 @@ module Trove
     getter value : Bytes
 
     def initialize(@value)
+      raise Exception.new "Digest must be of size 16 bytes, not #{@value.size} bytes" unless @value.size == 16
     end
 
     def self.of_data(data : Bytes)
