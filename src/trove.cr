@@ -12,6 +12,7 @@ module Trove
   OBJECT_ID_AND_PATH_TO_VALUE = 0_u8
 
   alias Encodable = String | Int64 | Float64 | Bool | Nil
+  alias DumpEntry = {object_id: String, object: JSON::Any}
 
   class Exception < Exception
   end
@@ -119,22 +120,10 @@ module Trove
       result
     end
 
-    alias DumpEntry = {object_id: String, object: JSON::Any}
-
     def dump(stream : IO)
       Compress::Gzip::Writer.open(stream, Compress::Deflate::BEST_COMPRESSION) do |compressor|
         objects do |object_id, object|
           compressor.puts({object_id: object_id.string, object: object}.to_json)
-        end
-      end
-    end
-
-    def load(stream : IO)
-      Compress::Gzip::Reader.open(stream) do |decompressor|
-        decompressor.each_line do |line|
-          dump_entry = DumpEntry.from_json line.chomp
-          object_id = ObjectId.from_string dump_entry[:object_id]
-          set object_id, "", dump_entry[:object]
         end
       end
     end
@@ -519,6 +508,18 @@ module Trove
     def checkpoint
       @database.checkpoint
       @index.database.checkpoint
+    end
+
+    def load(stream : IO)
+      Compress::Gzip::Reader.open(stream) do |decompressor|
+        decompressor.each_line do |line|
+          dump_entry = DumpEntry.from_json line.chomp
+          object_id = ObjectId.from_string dump_entry[:object_id]
+          transaction do |transaction|
+            transaction.set object_id, "", dump_entry[:object]
+          end
+        end
+      end
     end
   end
 end

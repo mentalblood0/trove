@@ -310,6 +310,9 @@ describe Trove do
     o0 = {"a" => "b"}
     o1 = COMPLEX_STRUCTURE
     dump = IO::Memory.new
+
+    i0 : Trove::ObjectId? = nil
+    i1 : Trove::ObjectId? = nil
     chest.transaction do |transaction|
       i0 = transaction << JSON.parse o0.to_json
       i1 = transaction << JSON.parse o1.to_json
@@ -318,10 +321,14 @@ describe Trove do
       transaction.delete i1
       transaction.get(i0).should eq nil
       transaction.get(i1).should eq nil
+    end
+    i0 = i0.not_nil!
+    i1 = i1.not_nil!
 
-      dump.rewind
-      transaction.load dump
+    dump.rewind
+    chest.load dump
 
+    chest.transaction do |transaction|
       (Set.new transaction.objects).should eq Set.new [{i0, o0}, {i1, o1}]
       transaction.get(i0).should eq o0
       transaction.get(i1).should eq o1
