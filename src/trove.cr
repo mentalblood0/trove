@@ -476,7 +476,6 @@ module Trove
 
     def commit
       @index_transaction.commit
-      @database_transaction.commit
     end
   end
 
@@ -489,16 +488,13 @@ module Trove
     def initialize(@index)
     end
 
-    def database
-      @index.database
-    end
-
     def clear
       @index.clear
     end
 
     def transaction
-      Transaction.new database.transaction, @index.transaction
+      index_transaction = @index.transaction
+      Transaction.new index_transaction.transaction, index_transaction
     end
 
     def transaction(&)
