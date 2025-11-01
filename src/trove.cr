@@ -8,12 +8,9 @@ require "dream"
 require "lawn/Database"
 
 module Trove
-  alias A = JSON::Any
-  alias H = Hash(String, A)
-  alias AA = Array(A)
-  alias I = String | Int64 | Float64 | Bool | Nil
-
   OBJECT_ID_AND_PATH_TO_VALUE = 0_u8
+
+  alias Encodable = String | Int64 | Float64 | Bool | Nil
 
   struct ObjectId
     getter value : Bytes
@@ -82,17 +79,17 @@ module Trove
 
     macro yield_object
       if flattened_object.size == 0
-        yield({object_id, A.new nil})
+        yield({object_id, JSON::Any.new nil})
       elsif flattened_object.has_key? ""
         yield({object_id, flattened_object[""]})
       else
-        yield({object_id, to_json_object A.new nest flattened_object})
+        yield({object_id, to_json_object JSON::Any.new nest flattened_object})
       end
     end
 
     def objects(&)
       object_id : ObjectId? = nil
-      flattened_object = H.new
+      flattened_object = Hash(String, JSON::Any).new
       @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
         unless current_object_id == object_id
@@ -103,7 +100,7 @@ module Trove
           object_id = current_object_id
         end
         current_path = String.new(current_object_id_and_path[16..])
-        flattened_object[current_path] = A.new decode current_value
+        flattened_object[current_path] = JSON::Any.new decode current_value
       end
       if object_id
         yield_object
@@ -111,12 +108,12 @@ module Trove
     end
 
     def objects
-      result = [] of {ObjectId, A}
+      result = [] of {ObjectId, JSON::Any}
       objects { |object| result << object }
       result
     end
 
-    alias DumpEntry = {object_id: String, object: A}
+    alias DumpEntry = {object_id: String, object: JSON::Any}
 
     def dump(stream : IO)
       Compress::Gzip::Writer.open(stream, Compress::Deflate::BEST_COMPRESSION) do |compressor|
@@ -146,7 +143,7 @@ module Trove
     ENCODED_TYPE_BOOL_TRUE  = 7_u8
     ENCODED_TYPE_BOOL_FALSE = 8_u8
 
-    protected def encode(value : I) : Bytes
+    protected def encode(value : Encodable) : Bytes
       case value
       when String
         result = Bytes.new 1 + value.bytesize
@@ -194,7 +191,7 @@ module Trove
       end
     end
 
-    protected def decode(encoded : Bytes) : I
+    protected def decode(encoded : Bytes) : Encodable
       return nil if encoded.empty?
       case encoded[0]
       when ENCODED_TYPE_STRING     then String.new encoded[1..]
@@ -256,7 +253,7 @@ module Trove
       end
     end
 
-    def where(present_pathvalues : Array({String, I}), absent_pathvalues : Array({String, I}) = [] of {String, I}, start_after_object : ObjectId? = nil, &)
+    def where(present_pathvalues : Array({String, Encodable}), absent_pathvalues : Array({String, Encodable}) = [] of {String, Encodable}, start_after_object : ObjectId? = nil, &)
       @index_transaction.find(
         present_pathvalues.map do |path, value|
           Dream::Id.new Digest.of_path_and_encoded_value(pad(path).to_slice, encode value).value
@@ -267,7 +264,7 @@ module Trove
       end
     end
 
-    def where(present_pathvalues : Array({String, I}), absent_pathvalues : Array({String, I}) = [] of {String, I}, limit : Int32 = Int32::MAX, start_after_object : ObjectId? = nil)
+    def where(present_pathvalues : Array({String, Encodable}), absent_pathvalues : Array({String, Encodable}) = [] of {String, Encodable}, limit : Int32 = Int32::MAX, start_after_object : ObjectId? = nil)
       result = [] of ObjectId
       where(present_pathvalues, absent_pathvalues, start_after_object) do |object_id|
         break if result.size >= limit
@@ -276,20 +273,20 @@ module Trove
       result
     end
 
-    def index_of(object_id : ObjectId, path : String, value : I) : Int32?
+    def index_of(object_id : ObjectId, path : String, value : Encodable) : Int32?
       padded_path = pad path
       partitioned_path = PartitionedPath.from_path padded_path
       @index_transaction.find([Dream::Id.new Digest.of_path_and_encoded_value(partitioned_path.base, object_id.value + encode value).value]) { |path_index_bytes_as_dream_id| return IndexBatch.path_index_from_bytes path_index_bytes_as_dream_id.value }
     end
 
-    protected def set(object_id : ObjectId, path : String, value : A::Type, index_batch : IndexBatch? = nil)
+    protected def set(object_id : ObjectId, path : String, value : JSON::Any::Type, index_batch : IndexBatch? = nil)
       case value
-      when H
+      when Hash(String, JSON::Any)
         value.each do |key, internal_value|
           escaped_key = key.gsub ".", "\\."
           set object_id, path.empty? ? escaped_key : "#{path}.#{escaped_key}", internal_value.raw, index_batch
         end
-      when AA
+      when Array(JSON::Any)
         array_index = 0_u32
         unique_internal_values = Set(String | Int64 | Float64 | Bool | Nil).new
         value.each do |internal_value_variant|
@@ -311,9 +308,9 @@ module Trove
       index_batch
     end
 
-    def set(object_id : ObjectId, path : String, value : A)
+    def set(object_id : ObjectId, path : String, value : JSON::Any)
       delete object_id, path
-      set(object_id, path, value.raw, IndexBatch.new object_id, self, :add).flush
+      set(object_id, path, value.is_a?(JSON::Any) ? value.raw : value, IndexBatch.new object_id, self, :add).flush
     end
 
     protected def deletei(object_id : ObjectId, path : String)
@@ -323,7 +320,7 @@ module Trove
         .flush
     end
 
-    def set!(object_id : ObjectId, path : String, value : A)
+    def set!(object_id : ObjectId, path : String, value : JSON::Any)
       padded_path = pad path
       case raw_value = value.raw
       when Bool, Float64, Int64, String, Nil
@@ -334,16 +331,16 @@ module Trove
       set(object_id, path, raw_value, IndexBatch.new object_id, self, :add).flush
     end
 
-    def <<(value : A)
+    def <<(value : JSON::Any)
       object_id = ObjectId.random
       set object_id, "", value
       object_id
     end
 
-    protected def to_json_object(value : A) : A
+    protected def to_json_object(value : JSON::Any) : JSON::Any
       if value_as_hashmap = value.as_h?
         if value_as_hashmap.keys.all? { |key| key.to_u32? }
-          return A.new value_as_hashmap.keys.sort_by { |key| key.to_u32 }.map { |key| to_json_object value_as_hashmap[key] }
+          return JSON::Any.new value_as_hashmap.keys.sort_by { |key| key.to_u32 }.map { |key| to_json_object value_as_hashmap[key] }
         else
           value_as_hashmap.each { |key, internal_value| value_as_hashmap[key] = to_json_object internal_value }
         end
@@ -351,8 +348,8 @@ module Trove
       value
     end
 
-    protected def nest(hashmap : H)
-      result = H.new
+    protected def nest(hashmap : Hash(String, JSON::Any))
+      result = Hash(String, JSON::Any).new
       hashmap.each do |path, value|
         splitted_path = path.split /(?<!\\)\./
         current = result
@@ -362,7 +359,7 @@ module Trove
           if segment_index == splitted_path.size - 1
             current[key] = value
           else
-            current[key] ||= A.new H.new
+            current[key] ||= JSON::Any.new Hash(String, JSON::Any).new
             current = current[key].as_h
           end
         end
@@ -378,7 +375,7 @@ module Trove
       path.gsub(/\b(\d{10})\b/) { (result = $1.lstrip '0').empty? ? "0" : result }
     end
 
-    def first(object_id : ObjectId, path : String = "") : {String, A}?
+    def first(object_id : ObjectId, path : String = "") : {String, JSON::Any}?
       padded_path = pad path
       @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + "#{padded_path}.".to_slice).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
@@ -389,7 +386,7 @@ module Trove
       end
     end
 
-    def last(object_id : ObjectId, path : String = "") : {String, A}?
+    def last(object_id : ObjectId, path : String = "") : {String, JSON::Any}?
       padded_path = pad path
       @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + (padded_path.empty? ? "9".to_slice : "#{padded_path}.9".to_slice), direction: :backward).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
@@ -400,7 +397,7 @@ module Trove
       end
     end
 
-    def push(object_id : ObjectId, path : String, values : AA) : Int32
+    def push(object_id : ObjectId, path : String, values : Array(JSON::Any)) : Int32
       padded_path = pad path
       last_path = ((last object_id, padded_path).not_nil![0] rescue "#{padded_path}.")
       partitioned_last_path = last_path.rpartition '.'
@@ -439,16 +436,16 @@ module Trove
 
     def get(object_id : ObjectId, path : String = "")
       padded_path = pad path
-      flat = H.new
+      flat = Hash(String, JSON::Any).new
       @database_transaction.cursor(OBJECT_ID_AND_PATH_TO_VALUE, from: object_id.value + padded_path.to_slice).each_next do |current_object_id_and_path, current_value|
         current_object_id = ObjectId.new current_object_id_and_path[..15]
         current_path = String.new(current_object_id_and_path[16..])
         break unless current_object_id == object_id && current_path.starts_with? padded_path
-        flat[unpad current_path.lchop(padded_path).lchop('.')] = A.new decode current_value
+        flat[unpad current_path.lchop(padded_path).lchop('.')] = JSON::Any.new decode current_value
       end
       return nil if flat.size == 0
       return flat[""] if flat.has_key? ""
-      to_json_object A.new nest flat
+      to_json_object JSON::Any.new nest flat
     end
 
     def get!(object_id : ObjectId, path : String)
