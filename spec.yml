@@ -1,15 +1,4 @@
 chest:
-  database:
-    log:
-      path: /tmp/trove/log.dat
-    tables:
-    # OBJECT_ID_AND_PATH_TO_VALUE
-    - data_storage:
-        dir: /tmp/trove/paths_to_values
-        max_element_size: 65536
-      index:
-        path: /tmp/trove/paths_to_values/index.idx
-        cache_size: 128MB
   index:
     database:
       log:
@@ -50,3 +39,10 @@ chest:
         index:
           path: /tmp/dream/object_to_tags_count/index.idx
           cache_size: 20MB
+      # OBJECT_ID_AND_PATH_TO_VALUE
+      - data_storage:
+          dir: /tmp/trove/paths_to_values
+          max_element_size: 65536
+        index:
+          path: /tmp/trove/paths_to_values/index.idx
+          cache_size: 128MB

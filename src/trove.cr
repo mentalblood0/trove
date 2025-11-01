@@ -9,7 +9,7 @@ require "dream"
 require "lawn/Database"
 
 module Trove
-  OBJECT_ID_AND_PATH_TO_VALUE = 0_u8
+  OBJECT_ID_AND_PATH_TO_VALUE = 5_u8
 
   alias Encodable = String | Int64 | Float64 | Bool | Nil
   alias DumpEntry = {object_id: String, object: JSON::Any}
@@ -120,7 +120,7 @@ module Trove
       result
     end
 
-    def dump(stream : IO, compression_level : Int32)
+    def dump(stream : IO, compression_level : Int32 = 3)
       Zstd::Compress::IO.open(stream, level: compression_level) do |compressor|
         objects do |object_id, object|
           compressor.puts({object_id: object_id.string, object: object}.to_json)
@@ -484,19 +484,21 @@ module Trove
     include YAML::Serializable
     include YAML::Serializable::Strict
 
-    getter database : Lawn::Database
     getter index : Dream::Index
 
-    def initialize(@database, @index)
+    def initialize(@index)
+    end
+
+    def database
+      @index.database
     end
 
     def clear
-      @database.clear
       @index.clear
     end
 
     def transaction
-      Transaction.new @database.transaction, @index.transaction
+      Transaction.new database.transaction, @index.transaction
     end
 
     def transaction(&)
@@ -506,14 +508,12 @@ module Trove
     end
 
     def checkpoint
-      @database.checkpoint
       @index.database.checkpoint
     end
 
     def load(stream : IO)
       Zstd::Decompress::IO.open(stream) do |decompressor|
         decompressor.each_line do |line|
-          puts line
           dump_entry = DumpEntry.from_json line.chomp
           object_id = ObjectId.from_string dump_entry[:object_id]
           transaction do |transaction|
