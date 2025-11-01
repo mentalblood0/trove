@@ -1,6 +1,7 @@
 require "json"
 require "yaml"
 require "uuid"
+require "base64"
 require "compress/gzip"
 
 require "xxhash128"
@@ -23,11 +24,11 @@ module Trove
     end
 
     def self.from_string(string : String)
-      self.new string.hexbytes
+      self.new Base64.decode string
     end
 
     def string
-      value.hexstring
+      Base64.encode @value
     end
 
     def <=>(other : ObjectId)
