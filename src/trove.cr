@@ -1,8 +1,8 @@
 require "json"
+require "zstd"
 require "yaml"
 require "uuid"
 require "base64"
-require "compress/gzip"
 
 require "xxhash128"
 require "dream"
@@ -120,8 +120,8 @@ module Trove
       result
     end
 
-    def dump(stream : IO)
-      Compress::Gzip::Writer.open(stream, Compress::Deflate::BEST_COMPRESSION) do |compressor|
+    def dump(stream : IO, compression_level : Int32)
+      Zstd::Compress::IO.open(stream, level: compression_level) do |compressor|
         objects do |object_id, object|
           compressor.puts({object_id: object_id.string, object: object}.to_json)
         end
@@ -511,8 +511,9 @@ module Trove
     end
 
     def load(stream : IO)
-      Compress::Gzip::Reader.open(stream) do |decompressor|
+      Zstd::Decompress::IO.open(stream) do |decompressor|
         decompressor.each_line do |line|
+          puts line
           dump_entry = DumpEntry.from_json line.chomp
           object_id = ObjectId.from_string dump_entry[:object_id]
           transaction do |transaction|

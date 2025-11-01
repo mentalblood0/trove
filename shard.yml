@@ -11,6 +11,8 @@ dependencies:
     github: mentalblood0/xxhash128
   dream:
     github: mentalblood0/dream
+  zstd:
+    github: didactic-drunk/zstd.cr
 
 crystal: '>= 1.16.3'
 
