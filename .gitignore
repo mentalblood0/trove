@@ -1,15 +1,1 @@
-/docs/
-/lib/
-/bin/
-/.shards/
-*.dwarf
-benchmark
-
-# Libraries don't need dependency lock
-# Dependencies will be locked in applications that use them
-/shard.lock
-
-*.a
-*.o
-*.so
-*.so.*
+/target
