@@ -179,7 +179,6 @@ pub struct ObjectsIterator<'a> {
     data_table_iterator:
         Box<dyn FallibleIterator<Item = ((ObjectId, String), Value), Error = Error> + 'a>,
     last_entry: Option<((ObjectId, String), Value)>,
-    end: bool,
 }
 
 impl<'a> ReadTransaction<'a> {
@@ -191,7 +190,6 @@ impl<'a> ReadTransaction<'a> {
                 .object_id_and_path_to_value
                 .iter(None)?,
             last_entry: None,
-            end: false,
         })
     }
 }
@@ -201,37 +199,33 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
     type Error = Error;
 
     fn next(&mut self) -> Result<Option<Self::Item>> {
-        if self.end {
-            Ok(None)
-        } else {
-            if self.last_entry.is_none() {
+        if self.last_entry.is_none() {
+            self.last_entry = self.data_table_iterator.next()?;
+        }
+        if let Some(first_object_entry) = self.last_entry.clone() {
+            let object_id = first_object_entry.0.0;
+            let mut flat_object_map: HashMap<String, FlatObject> = HashMap::new();
+            flat_object_map.insert(
+                first_object_entry.0.1,
+                FlatObject::Value(serde_json::Value::from(first_object_entry.1)),
+            );
+            loop {
                 self.last_entry = self.data_table_iterator.next()?;
-            }
-            if let Some(first_object_entry) = self.last_entry.clone() {
-                let object_id = first_object_entry.0.0;
-                let mut flat_object_map: HashMap<String, FlatObject> = HashMap::new();
-                flat_object_map.insert(
-                    first_object_entry.0.1,
-                    FlatObject::Value(serde_json::Value::from(first_object_entry.1)),
-                );
-                loop {
-                    self.last_entry = self.data_table_iterator.next()?;
-                    if let Some(current_entry) = &self.last_entry {
-                        flat_object_map.insert(
-                            current_entry.0.1.clone(),
-                            FlatObject::Value(serde_json::Value::from(current_entry.1.clone())),
-                        );
-                    } else {
-                        break;
-                    }
+                if let Some(current_entry) = &self.last_entry {
+                    flat_object_map.insert(
+                        current_entry.0.1.clone(),
+                        FlatObject::Value(serde_json::Value::from(current_entry.1.clone())),
+                    );
+                } else {
+                    break;
                 }
-                Ok(Some(Object {
-                    id: object_id,
-                    value: serde_json::Value::from(FlatObject::Map(flat_object_map)),
-                }))
-            } else {
-                Ok(None)
             }
+            Ok(Some(Object {
+                id: object_id,
+                value: serde_json::Value::from(FlatObject::Map(flat_object_map)),
+            }))
+        } else {
+            Ok(None)
         }
     }
 }
