@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,47 @@ impl ObjectId {
         Ok(Self {
             value: *uuid::Uuid::now_v7().as_bytes(),
         })
+    }
+}
+
+pub struct Object {
+    pub id: ObjectId,
+    pub value: serde_json::Value,
+}
+
+#[derive(Clone)]
+enum FlatObject {
+    Map(HashMap<String, FlatObject>),
+    Value(serde_json::Value),
+}
+
+impl From<FlatObject> for serde_json::Value {
+    fn from(flat_object: FlatObject) -> Self {
+        match flat_object {
+            FlatObject::Map(map) => {
+                if let Ok(mut indices) = fallible_iterator::convert(map.keys().map(|key| Ok(key)))
+                    .map(|key| String::try_from(key))
+                    .collect::<Vec<_>>()
+                {
+                    indices.sort();
+                    Self::Array(
+                        indices
+                            .iter()
+                            .map(|index| serde_json::Value::from(map[&index.to_string()].clone()))
+                            .collect(),
+                    )
+                } else {
+                    serde_json::Value::Object(
+                        map.iter()
+                            .map(|(key, value)| {
+                                (key.clone(), serde_json::Value::from(value.clone()))
+                            })
+                            .collect(),
+                    )
+                }
+            }
+            FlatObject::Value(value) => value,
+        }
     }
 }
 
@@ -85,12 +128,13 @@ impl Digest {
         }
     }
 
-    pub fn of_path_and_encoded_value(path: &Vec<u8>, encoded_value: &Vec<u8>) -> Self {
+    pub fn of_path_and_encoded_value(path: &str, value: &Value) -> Result<Self> {
+        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
         let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + encoded_value.len());
-        data.extend_from_slice(path);
+        data.extend_from_slice(path.as_bytes());
         data.push(0u8);
-        data.extend_from_slice(encoded_value);
-        Self::of_data(&data)
+        data.extend_from_slice(&encoded_value);
+        Ok(Self::of_data(&data))
     }
 }
 
@@ -131,4 +175,63 @@ pub struct WriteTransaction<'a, 'b, 'c> {
     pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
 }
 
-impl<'a> ReadTransaction<'a> {}
+pub struct ObjectsIterator<'a> {
+    data_table_iterator:
+        Box<dyn FallibleIterator<Item = ((ObjectId, String), Value), Error = Error> + 'a>,
+    last_entry: Option<((ObjectId, String), Value)>,
+    end: bool,
+}
+
+impl<'a> ReadTransaction<'a> {
+    pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
+        Ok(ObjectsIterator {
+            data_table_iterator: self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(None)?,
+            last_entry: None,
+            end: false,
+        })
+    }
+}
+
+impl<'a> FallibleIterator for ObjectsIterator<'a> {
+    type Item = Object;
+    type Error = Error;
+
+    fn next(&mut self) -> Result<Option<Self::Item>> {
+        if self.end {
+            Ok(None)
+        } else {
+            if self.last_entry.is_none() {
+                self.last_entry = self.data_table_iterator.next()?;
+            }
+            if let Some(first_object_entry) = self.last_entry.clone() {
+                let object_id = first_object_entry.0.0;
+                let mut flat_object_map: HashMap<String, FlatObject> = HashMap::new();
+                flat_object_map.insert(
+                    first_object_entry.0.1,
+                    FlatObject::Value(serde_json::Value::from(first_object_entry.1)),
+                );
+                loop {
+                    self.last_entry = self.data_table_iterator.next()?;
+                    if let Some(current_entry) = &self.last_entry {
+                        flat_object_map.insert(
+                            current_entry.0.1.clone(),
+                            FlatObject::Value(serde_json::Value::from(current_entry.1.clone())),
+                        );
+                    } else {
+                        break;
+                    }
+                }
+                Ok(Some(Object {
+                    id: object_id,
+                    value: serde_json::Value::from(FlatObject::Map(flat_object_map)),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
