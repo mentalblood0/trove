@@ -1,8 +1,7 @@
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
-use xxhash_rust::xxh3::xxh3_128;
-
 use serde::{Deserialize, Serialize};
+use xxhash_rust::xxh3::xxh3_128;
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
@@ -19,8 +18,54 @@ impl ObjectId {
     }
 }
 
+#[derive(bincode::Encode, bincode::Decode, Clone)]
+enum Value {
+    Null,
+    Integer(u64),
+    Float(f64),
+    Bool(bool),
+    String(String),
+}
+
+impl TryFrom<serde_json::Value> for Value {
+    type Error = Error;
+
+    fn try_from(json_value: serde_json::Value) -> Result<Self> {
+        match json_value {
+            serde_json::Value::Number(n) => {
+                if let Some(u) = n.as_u64() {
+                    Ok(Value::Integer(u))
+                } else if let Some(i) = n.as_i64() {
+                    Ok(Value::Integer(i as u64))
+                } else if let Some(f) = n.as_f64() {
+                    Ok(Value::Float(f))
+                } else {
+                    Ok(Value::Float(n.as_f64().unwrap_or(0.0)))
+                }
+            }
+            serde_json::Value::String(s) => Ok(Value::String(s)),
+            serde_json::Value::Bool(b) => Ok(Value::Bool(b)),
+            serde_json::Value::Null => Ok(Value::Null),
+            serde_json::Value::Array(_) => Err(anyhow!("Can not convert JSON array to value")),
+            serde_json::Value::Object(_) => Err(anyhow!("Can not convert JSON object to value")),
+        }
+    }
+}
+
+impl From<Value> for serde_json::Value {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Null => serde_json::Value::Null,
+            Value::Integer(i) => serde_json::Value::Number(i.into()),
+            Value::Float(f) => serde_json::json!(f),
+            Value::Bool(b) => serde_json::Value::Bool(b),
+            Value::String(s) => serde_json::Value::String(s),
+        }
+    }
+}
+
 dream::define_index!(trove_database {
-    object_id_and_path_to_value<(ObjectId, String), Vec<u8>>,
+    object_id_and_path_to_value<(ObjectId, String), super::super::Value>,
 } use {
     use crate::ObjectId;
 });
@@ -28,3 +73,62 @@ dream::define_index!(trove_database {
 struct Chest {
     index: trove_database::Index,
 }
+
+struct Digest {
+    value: [u8; 16],
+}
+
+impl Digest {
+    pub fn of_data(data: &Vec<u8>) -> Self {
+        Self {
+            value: xxhash_rust::xxh3::xxh3_128(data).to_le_bytes(),
+        }
+    }
+
+    pub fn of_path_and_encoded_value(path: &Vec<u8>, encoded_value: &Vec<u8>) -> Self {
+        let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + encoded_value.len());
+        data.extend_from_slice(path);
+        data.push(0u8);
+        data.extend_from_slice(encoded_value);
+        Self::of_data(&data)
+    }
+}
+
+struct PartitionedPath {
+    base: String,
+    index: Option<u64>,
+}
+
+impl PartitionedPath {
+    pub fn from_path(path: String) -> Self {
+        if let Some(dot_position) = path.rfind('.') {
+            let (base, index_string) = path.split_at(dot_position);
+            if let Ok(index) = index_string[1..].parse::<u64>() {
+                Self {
+                    base: base.to_string(),
+                    index: Some(index),
+                }
+            } else {
+                Self {
+                    base: base.to_string(),
+                    index: None,
+                }
+            }
+        } else {
+            Self {
+                base: path,
+                index: None,
+            }
+        }
+    }
+}
+
+pub struct ReadTransaction<'a> {
+    pub index_transaction: trove_database::ReadTransaction<'a>,
+}
+
+pub struct WriteTransaction<'a, 'b, 'c> {
+    pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
+}
+
+impl<'a> ReadTransaction<'a> {}
