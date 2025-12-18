@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -224,5 +224,52 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
         } else {
             Ok(None)
         }
+    }
+}
+
+impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
+    pub fn insert(
+        &mut self,
+        object_id: ObjectId,
+        path: String,
+        value: serde_json::Value,
+    ) -> Result<()> {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, internal_value) in map {
+                    let internal_path = if path.is_empty() {
+                        key
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    self.insert(object_id.clone(), internal_path, internal_value)?;
+                }
+            }
+            serde_json::Value::Array(array) => {
+                let mut array_index = 0u64;
+                let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
+                for internal_value in array {
+                    if unique_internal_values.contains(&internal_value) {
+                        continue;
+                    }
+                    unique_internal_values.insert(internal_value.clone());
+                    let key = format!("{:0>10}", array_index);
+                    let internal_path = if path.is_empty() {
+                        key
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    self.insert(object_id.clone(), internal_path, internal_value.clone())?;
+                    array_index += 1;
+                }
+            }
+            _ => {
+                self.index_transaction
+                    .database_transaction
+                    .object_id_and_path_to_value
+                    .insert((object_id, path), value.try_into()?);
+            }
+        }
+        Ok(())
     }
 }
