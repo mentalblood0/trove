@@ -276,8 +276,13 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
 
-    pub fn insert(&mut self, path: String, object: Object) -> Result<()> {
-        match object.value {
+    pub fn update(
+        &mut self,
+        object_id: ObjectId,
+        path: String,
+        value: serde_json::Value,
+    ) -> Result<ObjectId> {
+        match value {
             serde_json::Value::Object(map) => {
                 for (key, internal_value) in map {
                     let internal_path = if path.is_empty() {
@@ -285,13 +290,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.insert(
-                        internal_path,
-                        Object {
-                            id: object.id.clone(),
-                            value: internal_value,
-                        },
-                    )?;
+                    self.update(object_id.clone(), internal_path, internal_value)?;
                 }
             }
             serde_json::Value::Array(array) => {
@@ -308,13 +307,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.insert(
-                        internal_path,
-                        Object {
-                            id: object.id.clone(),
-                            value: internal_value.clone(),
-                        },
-                    )?;
+                    self.update(object_id.clone(), internal_path, internal_value.clone())?;
                     array_index += 1;
                 }
             }
@@ -322,10 +315,15 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 self.index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
-                    .insert((object.id, path), object.value.try_into()?);
+                    .insert((object_id.clone(), path), value.try_into()?);
             }
         }
-        Ok(())
+        Ok(object_id)
+    }
+
+    pub fn insert(&mut self, path: String, value: serde_json::Value) -> Result<ObjectId> {
+        let id = ObjectId::new();
+        self.update(id, path, value)
     }
 }
 
@@ -333,7 +331,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 mod tests {
     use serde_json::json;
 
-    use crate::{Chest, Object, ObjectId};
+    use crate::{Chest, Object};
     use fallible_iterator::FallibleIterator;
 
     fn new_default_chest(test_name_for_isolation: &str) -> Chest {
@@ -351,18 +349,15 @@ mod tests {
     #[test]
     fn test_insert() {
         let mut chest = new_default_chest("test_insert");
-        let object = Object {
-            id: ObjectId::new(),
-            value: json!({"key1": "value1", "key2": "value2"}),
-        };
+        let object_json = json!({"key1": "value1", "key2": "value2"});
 
         chest
             .lock_all_and_write(|transaction| {
-                transaction.insert("".to_string(), object.clone())?;
-                assert_eq!(
-                    transaction.objects()?.collect::<Vec<_>>()?,
-                    vec![object.clone()]
-                );
+                let object = Object {
+                    id: transaction.insert("".to_string(), object_json.clone())?,
+                    value: object_json.clone(),
+                };
+                assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, vec![object]);
                 Ok(())
             })
             .unwrap();
