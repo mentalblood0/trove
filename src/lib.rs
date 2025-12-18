@@ -25,39 +25,40 @@ pub struct Object {
     pub value: serde_json::Value,
 }
 
-#[derive(Clone)]
-enum FlatObject {
-    Map(HashMap<String, FlatObject>),
-    Value(serde_json::Value),
+struct FlatObject {
+    value: Vec<(String, serde_json::Value)>,
+}
+
+fn insert_into_map(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    parts: &[&str],
+    value: serde_json::Value,
+) {
+    if parts.len() == 1 {
+        map.insert(parts[0].to_string(), value);
+    } else {
+        let first = parts[0].to_string();
+        let rest = &parts[1..];
+        if !map.contains_key(&first) {
+            map.insert(
+                first.clone(),
+                serde_json::Value::Object(serde_json::Map::new()),
+            );
+        }
+        if let Some(serde_json::Value::Object(nested_map)) = map.get_mut(&first) {
+            insert_into_map(nested_map, rest, value);
+        }
+    }
 }
 
 impl From<FlatObject> for serde_json::Value {
     fn from(flat_object: FlatObject) -> Self {
-        match flat_object {
-            FlatObject::Map(map) => {
-                if let Ok(mut indices) = fallible_iterator::convert(map.keys().map(|key| Ok(key)))
-                    .map(|key| String::try_from(key))
-                    .collect::<Vec<_>>()
-                {
-                    indices.sort();
-                    Self::Array(
-                        indices
-                            .iter()
-                            .map(|index| serde_json::Value::from(map[&index.to_string()].clone()))
-                            .collect(),
-                    )
-                } else {
-                    serde_json::Value::Object(
-                        map.iter()
-                            .map(|(key, value)| {
-                                (key.clone(), serde_json::Value::from(value.clone()))
-                            })
-                            .collect(),
-                    )
-                }
-            }
-            FlatObject::Value(value) => value,
+        let mut map = serde_json::Map::new();
+        for (path, value) in flat_object.value {
+            let parts: Vec<&str> = path.split('.').collect();
+            insert_into_map(&mut map, &parts, value);
         }
+        serde_json::Value::Object(map)
     }
 }
 
@@ -204,25 +205,25 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
         }
         if let Some(first_object_entry) = self.last_entry.clone() {
             let object_id = first_object_entry.0.0;
-            let mut flat_object_map: HashMap<String, FlatObject> = HashMap::new();
-            flat_object_map.insert(
+            let mut flat_object: FlatObject = FlatObject { value: Vec::new() };
+            flat_object.value.push((
                 first_object_entry.0.1,
-                FlatObject::Value(serde_json::Value::from(first_object_entry.1)),
-            );
+                serde_json::Value::from(first_object_entry.1),
+            ));
             loop {
                 self.last_entry = self.data_table_iterator.next()?;
                 if let Some(current_entry) = &self.last_entry {
-                    flat_object_map.insert(
+                    flat_object.value.push((
                         current_entry.0.1.clone(),
-                        FlatObject::Value(serde_json::Value::from(current_entry.1.clone())),
-                    );
+                        serde_json::Value::from(current_entry.1.clone()),
+                    ));
                 } else {
                     break;
                 }
             }
             Ok(Some(Object {
                 id: object_id,
-                value: serde_json::Value::from(FlatObject::Map(flat_object_map)),
+                value: serde_json::Value::from(flat_object),
             }))
         } else {
             Ok(None)
