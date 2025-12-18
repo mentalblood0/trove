@@ -25,9 +25,7 @@ pub struct Object {
     pub value: serde_json::Value,
 }
 
-struct FlatObject {
-    value: Vec<(String, serde_json::Value)>,
-}
+type FlatObject = Vec<(String, serde_json::Value)>;
 
 fn insert_into_map(
     map: &mut serde_json::Map<String, serde_json::Value>,
@@ -51,15 +49,13 @@ fn insert_into_map(
     }
 }
 
-impl From<FlatObject> for serde_json::Value {
-    fn from(flat_object: FlatObject) -> Self {
-        let mut map = serde_json::Map::new();
-        for (path, value) in flat_object.value {
-            let parts: Vec<&str> = path.split('.').collect();
-            insert_into_map(&mut map, &parts, value);
-        }
-        serde_json::Value::Object(map)
+fn nest(flat_object: FlatObject) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (path, value) in flat_object {
+        let parts: Vec<&str> = path.split('.').collect();
+        insert_into_map(&mut map, &parts, value);
     }
+    serde_json::Value::Object(map)
 }
 
 #[derive(bincode::Encode, bincode::Decode, Clone)]
@@ -205,15 +201,15 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
         }
         if let Some(first_object_entry) = self.last_entry.clone() {
             let object_id = first_object_entry.0.0;
-            let mut flat_object: FlatObject = FlatObject { value: Vec::new() };
-            flat_object.value.push((
+            let mut flat_object: FlatObject = Vec::new();
+            flat_object.push((
                 first_object_entry.0.1,
                 serde_json::Value::from(first_object_entry.1),
             ));
             loop {
                 self.last_entry = self.data_table_iterator.next()?;
                 if let Some(current_entry) = &self.last_entry {
-                    flat_object.value.push((
+                    flat_object.push((
                         current_entry.0.1.clone(),
                         serde_json::Value::from(current_entry.1.clone()),
                     ));
@@ -223,7 +219,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
             }
             Ok(Some(Object {
                 id: object_id,
-                value: serde_json::Value::from(flat_object),
+                value: nest(flat_object),
             }))
         } else {
             Ok(None)
