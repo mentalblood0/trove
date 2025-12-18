@@ -321,9 +321,9 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         Ok(object_id)
     }
 
-    pub fn insert(&mut self, path: String, value: serde_json::Value) -> Result<ObjectId> {
+    pub fn insert(&mut self, value: serde_json::Value) -> Result<ObjectId> {
         let id = ObjectId::new();
-        self.update(id, path, value)
+        self.update(id, "".to_string(), value)
     }
 }
 
@@ -354,7 +354,7 @@ mod tests {
         chest
             .lock_all_and_write(|transaction| {
                 let object = Object {
-                    id: transaction.insert("".to_string(), object_json.clone())?,
+                    id: transaction.insert(object_json.clone())?,
                     value: object_json.clone(),
                 };
                 assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, vec![object]);
