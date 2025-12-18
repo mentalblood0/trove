@@ -218,17 +218,23 @@ pub struct ObjectsIterator<'a> {
     last_entry: Option<((ObjectId, String), Value)>,
 }
 
+macro_rules! define_read_methods {
+    () => {
+        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
+            Ok(ObjectsIterator {
+                data_table_iterator: self
+                    .index_transaction
+                    .database_transaction
+                    .object_id_and_path_to_value
+                    .iter(None)?,
+                last_entry: None,
+            })
+        }
+    };
+}
+
 impl<'a> ReadTransaction<'a> {
-    pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
-        Ok(ObjectsIterator {
-            data_table_iterator: self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(None)?,
-            last_entry: None,
-        })
-    }
+    define_read_methods!();
 }
 
 impl<'a> FallibleIterator for ObjectsIterator<'a> {
@@ -268,6 +274,8 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
 }
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
+    define_read_methods!();
+
     pub fn insert(&mut self, path: String, object: Object) -> Result<()> {
         match object.value {
             serde_json::Value::Object(map) => {
@@ -351,12 +359,6 @@ mod tests {
         chest
             .lock_all_and_write(|transaction| {
                 transaction.insert("".to_string(), object.clone())?;
-                Ok(())
-            })
-            .unwrap();
-
-        chest
-            .lock_all_writes_and_read(|transaction| {
                 assert_eq!(
                     transaction.objects()?.collect::<Vec<_>>()?,
                     vec![object.clone()]
