@@ -13,13 +13,14 @@ pub struct ObjectId {
 }
 
 impl ObjectId {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
+    pub fn new() -> Self {
+        Self {
             value: *uuid::Uuid::now_v7().as_bytes(),
-        })
+        }
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Object {
     pub id: ObjectId,
     pub value: serde_json::Value,
@@ -112,6 +113,45 @@ dream::define_index!(trove_database {
 
 struct Chest {
     index: trove_database::Index,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChestConfig {
+    index: trove_database::IndexConfig,
+}
+
+impl Chest {
+    pub fn new(config: ChestConfig) -> Result<Self> {
+        Ok(Self {
+            index: trove_database::Index::new(config.index)?,
+        })
+    }
+
+    pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
+    where
+        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<()>,
+    {
+        self.index.lock_all_and_write(|index_write_transaction| {
+            f(&mut WriteTransaction {
+                index_transaction: index_write_transaction,
+            })
+        })?;
+
+        Ok(self)
+    }
+
+    pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
+    where
+        F: FnMut(ReadTransaction) -> Result<()>,
+    {
+        self.index
+            .lock_all_writes_and_read(|index_read_transaction| {
+                f(ReadTransaction {
+                    index_transaction: index_read_transaction,
+                })
+            })?;
+        Ok(self)
+    }
 }
 
 struct Digest {
@@ -228,13 +268,8 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
 }
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
-    pub fn insert(
-        &mut self,
-        object_id: ObjectId,
-        path: String,
-        value: serde_json::Value,
-    ) -> Result<()> {
-        match value {
+    pub fn insert(&mut self, path: String, object: Object) -> Result<()> {
+        match object.value {
             serde_json::Value::Object(map) => {
                 for (key, internal_value) in map {
                     let internal_path = if path.is_empty() {
@@ -242,7 +277,13 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.insert(object_id.clone(), internal_path, internal_value)?;
+                    self.insert(
+                        internal_path,
+                        Object {
+                            id: object.id.clone(),
+                            value: internal_value,
+                        },
+                    )?;
                 }
             }
             serde_json::Value::Array(array) => {
@@ -259,7 +300,13 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.insert(object_id.clone(), internal_path, internal_value.clone())?;
+                    self.insert(
+                        internal_path,
+                        Object {
+                            id: object.id.clone(),
+                            value: internal_value.clone(),
+                        },
+                    )?;
                     array_index += 1;
                 }
             }
@@ -267,9 +314,55 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 self.index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
-                    .insert((object_id, path), value.try_into()?);
+                    .insert((object.id, path), object.value.try_into()?);
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::{Chest, Object, ObjectId};
+    use fallible_iterator::FallibleIterator;
+
+    fn new_default_chest(test_name_for_isolation: &str) -> Chest {
+        Chest::new(
+            serde_saphyr::from_str(
+                &std::fs::read_to_string("src/test_chest_config.yml")
+                    .unwrap()
+                    .replace("TEST_NAME", test_name_for_isolation),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_insert() {
+        let mut chest = new_default_chest("test_insert");
+        let object = Object {
+            id: ObjectId::new(),
+            value: json!({"key1": "value1", "key2": "value2"}),
+        };
+
+        chest
+            .lock_all_and_write(|transaction| {
+                transaction.insert("".to_string(), object.clone())?;
+                Ok(())
+            })
+            .unwrap();
+
+        chest
+            .lock_all_writes_and_read(|transaction| {
+                assert_eq!(
+                    transaction.objects()?.collect::<Vec<_>>()?,
+                    vec![object.clone()]
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 }

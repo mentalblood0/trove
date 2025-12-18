@@ -1,0 +1,47 @@
+index:
+  database:
+    log:
+      path: /tmp/trove/test/TEST_NAME/log.dat
+    tables:
+      object_id_and_path_to_value:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/object_id_and_path_to_value/index.idx
+        data_pool:
+          variable:
+            directory: /tmp/trove/test/TEST_NAME/tables/object_id_and_path_to_value/data
+            max_element_size: 65536
+      tag_and_object:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/tag_and_object/index.idx
+        data_pool:
+          fixed:
+            path: /tmp/trove/test/TEST_NAME/tables/tag_and_object/data.dat
+            container_size: 32
+      object_and_tag:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/object_and_tag/index.idx
+        data_pool:
+          fixed:
+            path: /tmp/trove/test/TEST_NAME/tables/object_and_tag/data.dat
+            container_size: 32
+      id_to_source:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/id_to_source/index.idx
+        data_pool:
+          variable:
+            directory: /tmp/trove/test/TEST_NAME/tables/id_to_source/data
+            max_element_size: 65536
+      tag_to_objects_count:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/tag_to_objects_count/index.idx
+        data_pool:
+          fixed:
+            path: /tmp/trove/test/TEST_NAME/tables/tag_to_objects_count/data.dat
+            container_size: 20
+      object_to_tags_count:
+        index:
+          path: /tmp/trove/test/TEST_NAME/tables/object_to_tags_count/index.idx
+        data_pool:
+          fixed:
+            path: /tmp/trove/test/TEST_NAME/tables/object_to_tags_count/data.dat
+            container_size: 20
