@@ -372,11 +372,12 @@ impl IndexBatch {
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
 
-    pub fn update(
+    fn update_with_index(
         &mut self,
         object_id: ObjectId,
         path: String,
         value: serde_json::Value,
+        index_batch: &mut IndexBatch,
     ) -> Result<ObjectId> {
         match value {
             serde_json::Value::Object(map) => {
@@ -386,7 +387,12 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.update(object_id.clone(), internal_path, internal_value)?;
+                    self.update_with_index(
+                        object_id.clone(),
+                        internal_path,
+                        internal_value,
+                        index_batch,
+                    )?;
                 }
             }
             serde_json::Value::Array(array) => {
@@ -403,7 +409,12 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
-                    self.update(object_id.clone(), internal_path, internal_value.clone())?;
+                    self.update_with_index(
+                        object_id.clone(),
+                        internal_path,
+                        internal_value.clone(),
+                        index_batch,
+                    )?;
                     array_index += 1;
                 }
             }
@@ -417,9 +428,21 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         Ok(object_id)
     }
 
+    pub fn update(
+        &mut self,
+        object_id: ObjectId,
+        path: String,
+        value: serde_json::Value,
+    ) -> Result<ObjectId> {
+        let mut index_batch = IndexBatch::new(object_id.clone());
+        self.update_with_index(object_id.clone(), path, value, &mut index_batch)?;
+        index_batch.flush_insert(self.index_transaction)?;
+        Ok(object_id)
+    }
+
     pub fn insert(&mut self, value: serde_json::Value) -> Result<ObjectId> {
         let id = ObjectId::new();
-        self.update(id, "".to_string(), value)
+        self.update(id.clone(), "".to_string(), value)
     }
 }
 
