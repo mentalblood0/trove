@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
-use xxhash_rust::xxh3::xxh3_128;
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
@@ -111,13 +110,13 @@ dream::define_index!(trove_database {
     use crate::ObjectId;
 });
 
-struct Chest {
-    index: trove_database::Index,
+pub struct Chest {
+    pub index: trove_database::Index,
 }
 
 #[derive(Serialize, Deserialize)]
-struct ChestConfig {
-    index: trove_database::IndexConfig,
+pub struct ChestConfig {
+    pub index: trove_database::IndexConfig,
 }
 
 impl Chest {
@@ -159,13 +158,13 @@ struct Digest {
 }
 
 impl Digest {
-    pub fn of_data(data: &Vec<u8>) -> Self {
+    fn of_data(data: &Vec<u8>) -> Self {
         Self {
             value: xxhash_rust::xxh3::xxh3_128(data).to_le_bytes(),
         }
     }
 
-    pub fn of_path_and_encoded_value(path: &str, value: &Value) -> Result<Self> {
+    fn of_path_and_encoded_value(path: &str, value: &Value) -> Result<Self> {
         let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
         let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + encoded_value.len());
         data.extend_from_slice(path.as_bytes());
@@ -174,7 +173,7 @@ impl Digest {
         Ok(Self::of_data(&data))
     }
 
-    pub fn of_path_object_id_and_value(
+    fn of_path_object_id_and_value(
         path: &str,
         object_id: &ObjectId,
         value: &Value,
@@ -195,7 +194,7 @@ struct PartitionedPath {
 }
 
 impl PartitionedPath {
-    pub fn from_path(path: String) -> Self {
+    fn from_path(path: String) -> Self {
         if let Some(dot_position) = path.rfind('.') {
             let (base, index_string) = path.split_at(dot_position);
             if let Ok(index) = index_string[1..].parse::<u64>() {
@@ -243,6 +242,49 @@ macro_rules! define_read_methods {
                     .iter(None)?,
                 last_entry: None,
             })
+        }
+
+        pub fn select(
+            &'a self,
+            present_pathvalues: &Vec<(String, serde_json::Value)>,
+            absent_pathvalues: &Vec<(String, serde_json::Value)>,
+            start_after_object: Option<ObjectId>,
+        ) -> Result<Box<dyn FallibleIterator<Item = dream::Id, Error = Error> + '_>> {
+            let present_ids = {
+                let mut result = Vec::new();
+                for (path, value) in present_pathvalues {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_path_and_encoded_value(
+                            path,
+                            &Value::try_from(value.clone())?,
+                        )?
+                        .value,
+                    }));
+                }
+                result
+            };
+            let absent_ids = {
+                let mut result = Vec::new();
+                for (path, value) in absent_pathvalues {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_path_and_encoded_value(
+                            path,
+                            &Value::try_from(value.clone())?,
+                        )?
+                        .value,
+                    }));
+                }
+                result
+            };
+            Ok(Box::new(self.index_transaction.search(
+                &present_ids,
+                &absent_ids,
+                start_after_object.and_then(|start_after_object| {
+                    Some(dream::Id {
+                        value: start_after_object.value,
+                    })
+                }),
+            )?))
         }
     };
 }
@@ -409,6 +451,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                     } else {
                         format!("{path}.{key}")
                     };
+                    index_batch.push(internal_path.clone(), internal_value.clone().try_into()?)?;
                     self.update_with_index(
                         object_id.clone(),
                         internal_path,
