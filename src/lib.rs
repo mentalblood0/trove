@@ -173,6 +173,20 @@ impl Digest {
         data.extend_from_slice(&encoded_value);
         Ok(Self::of_data(&data))
     }
+
+    pub fn of_path_object_id_and_value(
+        path: &str,
+        object_id: &ObjectId,
+        value: &Value,
+    ) -> Result<Self> {
+        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
+        let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + 16 + encoded_value.len());
+        data.extend_from_slice(path.as_bytes());
+        data.push(0u8);
+        data.extend_from_slice(&object_id.value);
+        data.extend_from_slice(&encoded_value);
+        Ok(Self::of_data(&data))
+    }
 }
 
 struct PartitionedPath {
@@ -270,6 +284,88 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
         } else {
             Ok(None)
         }
+    }
+}
+
+struct IndexBatch {
+    object_id: ObjectId,
+    digests: Vec<dream::Object>,
+    array_digests: HashMap<u64, Vec<dream::Object>>,
+}
+
+impl IndexBatch {
+    fn new(object_id: ObjectId) -> Self {
+        Self {
+            object_id,
+            digests: Vec::new(),
+            array_digests: HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, path: String, value: Value) -> Result<&Self> {
+        let partitioned_path = PartitionedPath::from_path(path);
+        if let Some(path_index) = partitioned_path.index {
+            self.digests.push(dream::Object::Identified(dream::Id {
+                value: Digest::of_path_and_encoded_value(&partitioned_path.base, &value)?.value,
+            }));
+            self.array_digests
+                .entry(path_index)
+                .or_insert(Vec::new())
+                .push(dream::Object::Identified(dream::Id {
+                    value: Digest::of_path_object_id_and_value(
+                        &partitioned_path.base,
+                        &self.object_id,
+                        &value,
+                    )?
+                    .value,
+                }));
+        } else {
+            self.digests.push(dream::Object::Identified(dream::Id {
+                value: Digest::of_path_and_encoded_value(&partitioned_path.base, &value)?.value,
+            }));
+        }
+        Ok(self)
+    }
+
+    fn u64_to_dream_object(input: u64) -> dream::Object {
+        let mut value = [0u8; 16];
+        value[8..].copy_from_slice(&input.to_be_bytes());
+        dream::Object::Identified(dream::Id { value })
+    }
+
+    fn flush_insert(
+        &self,
+        index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
+    ) -> Result<&Self> {
+        index_transaction.insert(
+            &dream::Object::Identified(dream::Id {
+                value: self.object_id.value,
+            }),
+            &self.digests,
+        )?;
+        for (path_index, path_index_paths_digests) in self.array_digests.iter() {
+            index_transaction.insert(
+                &Self::u64_to_dream_object(*path_index),
+                path_index_paths_digests,
+            )?;
+        }
+        Ok(self)
+    }
+
+    fn flush_remove(
+        &self,
+        index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
+    ) -> Result<&Self> {
+        index_transaction.remove_object(&dream::Object::Identified(dream::Id {
+            value: self.object_id.value,
+        }))?;
+        for (path_index, path_index_paths_digests) in self.array_digests.iter() {
+            index_transaction.remove_tags_from_object(
+                &Self::u64_to_dream_object(*path_index),
+                path_index_paths_digests,
+            )?;
+        }
+        Ok(self)
     }
 }
 
