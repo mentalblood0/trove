@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_generative() {
-        let mut chest = new_default_chest("test_insert");
+        let mut chest = new_default_chest("test_generative");
         let mut json_generator = RandomJsonGenerator::new(0);
 
         chest
@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn test_simple() {
-        let mut chest = new_default_chest("test_insert");
+        let mut chest = new_default_chest("test_simple");
         let object_json = json!({
             "dict": {
                 "hello": ["number", 42, -4.2, 0.0],
