@@ -27,6 +27,16 @@ pub struct Object {
 
 type FlatObject = Vec<(String, serde_json::Value)>;
 
+fn pad(path: &str) -> String {
+    let re = regex::Regex::new(r"\b\d{1,9}\b").unwrap();
+    re.replace_all(&path, |caps: &regex::Captures| {
+        let segment = caps.get(0).unwrap().as_str();
+
+        format!("{:0>10}", segment)
+    })
+    .to_string()
+}
+
 fn insert_into_map(
     map: &mut serde_json::Map<String, serde_json::Value>,
     parts: &[&str],
@@ -64,7 +74,7 @@ fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
             if let Ok(mut pairs) =
                 fallible_iterator::convert(map.iter().map(|keyvalue| Ok::<_, Error>(keyvalue)))
                     .map(|(key, value)| Ok((key.parse::<u64>()?, value.clone())))
-                    .collect::<Vec<(u64, serde_json::Value)>>()
+                    .collect::<Vec<_>>()
             {
                 pairs.sort_by_key(|(key, _)| key.clone());
                 serde_json::Value::Array(
@@ -274,6 +284,40 @@ macro_rules! define_read_methods {
                     .iter(None)?,
                 last_entry: None,
             })
+        }
+
+        pub fn get(&'a self, object_id: ObjectId, path_prefix: &str) -> Result<serde_json::Value> {
+            let padded_path_prefix = pad(path_prefix);
+            let mut flat_object: FlatObject = Vec::new();
+            let mut iterator = self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
+                .take_while(|entry| {
+                    Ok(entry.0.0 == object_id && entry.0.1.starts_with(&padded_path_prefix))
+                });
+            loop {
+                if let Some(entry) = iterator.next()? {
+                    let start_from = if padded_path_prefix.is_empty() {
+                        0
+                    } else {
+                        entry.0.1.len().min(padded_path_prefix.len() + 1)
+                    };
+                    flat_object.push((
+                        entry.0.1.clone()[start_from..].to_string(),
+                        serde_json::Value::from(entry.1.clone()),
+                    ));
+                } else {
+                    break;
+                }
+            }
+            if flat_object.len() == 1 && flat_object[0].0 == "" {
+                Ok(flat_object[0].clone().1)
+            } else {
+                let nested = nest(flat_object);
+                Ok(process_arrays(nested))
+            }
         }
 
         pub fn select(
@@ -566,7 +610,103 @@ mod tests {
                     id: transaction.insert(object_json.clone())?,
                     value: object_json.clone(),
                 };
-                assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, vec![object]);
+
+                assert_eq!(
+                    transaction.objects()?.collect::<Vec<_>>()?,
+                    vec![object.clone()]
+                );
+
+                assert_eq!(
+                    &transaction.get(object.id.clone(), "dict")?,
+                    object.value.as_object().unwrap().get("dict").unwrap()
+                );
+                assert_eq!(
+                    &transaction.get(object.id.clone(), "dict.hello")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("hello")
+                        .unwrap()
+                );
+                assert_eq!(
+                    &transaction.get(object.id.clone(), "dict.boolean")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("boolean")
+                        .unwrap()
+                );
+                assert_eq!(
+                    transaction.get(object.id.clone(), "dict.hello.0")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("hello")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[0]
+                );
+                assert_eq!(
+                    transaction.get(object.id.clone(), "dict.hello.1")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("hello")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[1]
+                );
+                assert_eq!(
+                    transaction.get(object.id.clone(), "dict.hello.2")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("hello")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[2]
+                );
+                assert_eq!(
+                    transaction.get(object.id.clone(), "dict.hello.3")?,
+                    object
+                        .value
+                        .as_object()
+                        .unwrap()
+                        .get("dict")
+                        .unwrap()
+                        .as_object()
+                        .unwrap()
+                        .get("hello")
+                        .unwrap()
+                        .as_array()
+                        .unwrap()[3]
+                );
+
                 Ok(())
             })
             .unwrap();

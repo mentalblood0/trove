@@ -818,6 +818,7 @@ dependencies = [
  "lawn",
  "nanorand",
  "pretty_assertions",
+ "regex",
  "serde",
  "serde-saphyr",
  "serde_json",
