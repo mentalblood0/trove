@@ -103,8 +103,7 @@ fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
 #[derive(bincode::Encode, bincode::Decode, Clone)]
 enum Value {
     Null,
-    SignedInteger(i64),
-    UnsignedInteger(u64),
+    Integer(i64),
     Float(f64),
     Bool(bool),
     String(String),
@@ -116,10 +115,8 @@ impl TryFrom<serde_json::Value> for Value {
     fn try_from(json_value: serde_json::Value) -> Result<Self> {
         match json_value {
             serde_json::Value::Number(n) => {
-                if let Some(u) = n.as_u64() {
-                    Ok(Value::UnsignedInteger(u))
-                } else if let Some(i) = n.as_i64() {
-                    Ok(Value::SignedInteger(i as i64))
+                if let Some(i) = n.as_i64() {
+                    Ok(Value::Integer(i as i64))
                 } else if let Some(f) = n.as_f64() {
                     Ok(Value::Float(f))
                 } else {
@@ -139,8 +136,7 @@ impl From<Value> for serde_json::Value {
     fn from(value: Value) -> Self {
         match value {
             Value::Null => serde_json::Value::Null,
-            Value::SignedInteger(i) => serde_json::Value::Number(i.into()),
-            Value::UnsignedInteger(i) => serde_json::Value::Number(i.into()),
+            Value::Integer(i) => serde_json::Value::Number(i.into()),
             Value::Float(f) => serde_json::json!(f),
             Value::Bool(b) => serde_json::Value::Bool(b),
             Value::String(s) => serde_json::Value::String(s),
@@ -618,25 +614,10 @@ mod tests {
                 let choice = self.rng.generate_range(0..=7);
                 match choice {
                     0 => serde_json::Value::Null,
-                    1 => self.generate_bool(),
-                    2 => self.generate_number(),
-                    3 => self.generate_string(),
                     4 => self.generate_array(depth),
                     5 => self.generate_object(depth),
                     _ => self.generate_primitive(),
                 }
-            }
-        }
-
-        fn generate_bool(&mut self) -> serde_json::Value {
-            serde_json::Value::Bool(self.rng.generate())
-        }
-
-        fn generate_number(&mut self) -> serde_json::Value {
-            match self.rng.generate_range(0..3) {
-                0 => json!(self.rng.generate::<i64>() % 1000),
-                1 => json!(self.rng.generate::<f64>() * 1000.0),
-                _ => json!(self.rng.generate::<u64>() % 1000),
             }
         }
 
@@ -732,15 +713,17 @@ mod tests {
 
         chest
             .lock_all_and_write(|transaction| {
-                let mut objects: Vec<Object> = Vec::new();
-                for _ in 0..100 {
-                    let json = json_generator.generate(3);
-                    objects.push(Object {
-                        id: transaction.insert(json.clone())?,
-                        value: json,
-                    })
-                }
-
+                let objects = {
+                    let mut result = Vec::new();
+                    for _ in 0..100 {
+                        let json = json_generator.generate(3);
+                        result.push(Object {
+                            id: transaction.insert(json.clone())?,
+                            value: json,
+                        })
+                    }
+                    result
+                };
                 assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 Ok(())
             })
