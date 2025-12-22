@@ -583,8 +583,6 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use nanorand::{Rng, WyRand};
     use serde_json::json;
 
@@ -622,16 +620,14 @@ mod tests {
         }
 
         fn generate_string(&mut self) -> serde_json::Value {
-            let length = self.rng.generate_range(0..50);
-
-            let chars: Vec<char> = (0..length)
-                .map(|_| {
-                    let c = self.rng.generate_range(32..127) as u8 as char;
-                    c
-                })
-                .collect();
-
-            serde_json::Value::String(chars.iter().collect())
+            serde_json::Value::String(
+                (0..self.rng.generate_range(0..50))
+                    .map(|_| {
+                        let c = self.rng.generate_range(32..127) as u8 as char;
+                        c
+                    })
+                    .collect(),
+            )
         }
 
         fn generate_array(&mut self, depth: usize) -> serde_json::Value {
@@ -659,36 +655,24 @@ mod tests {
         }
 
         fn generate_object(&mut self, depth: usize) -> serde_json::Value {
-            let size = self.rng.generate_range(1..self.max_object_size);
-
-            let mut map = HashMap::new();
-
-            for _ in 0..size {
-                let key_length = self.rng.generate_range(1..20);
-
-                let key: String = (0..key_length)
+            serde_json::Value::Object(
+                (0..self.rng.generate_range(1..self.max_object_size))
                     .map(|_| {
-                        let choices =
-                            b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-                        let idx = self.rng.generate_range(0..choices.len());
-                        choices[idx] as char
+                        (
+                            self.generate_string().as_str().unwrap().to_string(),
+                            self.generate(depth - 1),
+                        )
                     })
-                    .collect();
-
-                let value = self.generate(depth - 1);
-
-                map.insert(key, value);
-            }
-
-            serde_json::Value::Object(serde_json::Map::from_iter(map))
+                    .collect::<serde_json::Map<_, _>>(),
+            )
         }
 
         fn generate_primitive(&mut self) -> serde_json::Value {
             match self.rng.generate_range(0..5) {
                 0 => serde_json::Value::Null,
                 1 => serde_json::Value::Bool(self.rng.generate()),
-                2 => json!(self.rng.generate::<i64>() % 1000),
-                3 => json!(self.rng.generate::<f64>() * 1000.0),
+                2 => json!(self.rng.generate::<i64>()),
+                3 => json!(self.rng.generate::<f64>()),
                 _ => self.generate_string(),
             }
         }
