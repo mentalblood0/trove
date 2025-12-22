@@ -441,17 +441,22 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 let mut array_index = 0u64;
                 let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
                 for internal_value in array {
-                    if unique_internal_values.contains(&internal_value) {
-                        continue;
+                    match internal_value {
+                        serde_json::Value::Array(_) => {}
+                        serde_json::Value::Object(_) => {}
+                        _ => {
+                            if unique_internal_values.contains(&internal_value) {
+                                continue;
+                            }
+                            unique_internal_values.insert(internal_value.clone());
+                        }
                     }
-                    unique_internal_values.insert(internal_value.clone());
                     let key = format!("{:0>10}", array_index);
                     let internal_path = if path.is_empty() {
                         key
                     } else {
                         format!("{path}.{key}")
                     };
-                    index_batch.push(internal_path.clone(), internal_value.clone().try_into()?)?;
                     self.update_with_index(
                         object_id.clone(),
                         internal_path,
@@ -462,6 +467,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 }
             }
             _ => {
+                index_batch.push(path.clone(), value.clone().try_into()?)?;
                 self.index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
@@ -495,6 +501,7 @@ mod tests {
 
     use crate::{Chest, Object};
     use fallible_iterator::FallibleIterator;
+    use pretty_assertions::assert_eq;
 
     fn new_default_chest(test_name_for_isolation: &str) -> Chest {
         Chest::new(
@@ -511,7 +518,14 @@ mod tests {
     #[test]
     fn test_insert() {
         let mut chest = new_default_chest("test_insert");
-        let object_json = json!({"key1": "value1", "key2": "value2"});
+        let object_json = json!({
+            "dict": {
+                "hello": ["number", 42, -4.2, 0.0],
+                "boolean": false
+            },
+            "null": null,
+            "array": [1, ["two", false], [null]]
+        });
 
         chest
             .lock_all_and_write(|transaction| {
