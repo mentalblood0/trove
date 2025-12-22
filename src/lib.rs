@@ -61,11 +61,11 @@ fn nest(flat_object: FlatObject) -> serde_json::Value {
 fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
     match nested_object {
         serde_json::Value::Object(map) => {
-            if map.keys().all(|key| key.parse::<u64>().is_ok()) {
-                let mut pairs = map
-                    .into_iter()
-                    .map(|(key, value)| (key.parse::<u64>().unwrap(), value))
-                    .collect::<Vec<_>>();
+            if let Ok(mut pairs) =
+                fallible_iterator::convert(map.iter().map(|keyvalue| Ok::<_, Error>(keyvalue)))
+                    .map(|(key, value)| Ok((key.parse::<u64>()?, value.clone())))
+                    .collect::<Vec<(u64, serde_json::Value)>>()
+            {
                 pairs.sort_by_key(|(key, _)| key.clone());
                 serde_json::Value::Array(
                     pairs
