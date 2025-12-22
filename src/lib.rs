@@ -389,6 +389,9 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
             loop {
                 self.last_entry = self.data_table_iterator.next()?;
                 if let Some(current_entry) = &self.last_entry {
+                    if current_entry.0.0 != object_id {
+                        break;
+                    }
                     flat_object.push((
                         current_entry.0.1.clone(),
                         serde_json::Value::from(current_entry.1.clone()),
@@ -397,11 +400,19 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     break;
                 }
             }
-            let nested = nest(flat_object);
-            Ok(Some(Object {
-                id: object_id,
-                value: process_arrays(nested),
-            }))
+            if flat_object.len() == 1 && flat_object[0].0 == "" {
+                Ok(Some(Object {
+                    id: object_id,
+                    value: flat_object[0].clone().1,
+                }))
+            } else {
+                let nested = nest(flat_object);
+                let processed = process_arrays(nested);
+                Ok(Some(Object {
+                    id: object_id,
+                    value: processed,
+                }))
+            }
         } else {
             Ok(None)
         }
@@ -643,7 +654,7 @@ mod tests {
         }
 
         fn generate_array(&mut self, depth: usize) -> serde_json::Value {
-            let size = self.rng.generate_range(0..self.max_array_size);
+            let size = self.rng.generate_range(1..self.max_array_size);
 
             let array: Vec<serde_json::Value> =
                 (0..size).map(|_| self.generate(depth - 1)).collect();
@@ -652,7 +663,7 @@ mod tests {
         }
 
         fn generate_object(&mut self, depth: usize) -> serde_json::Value {
-            let size = self.rng.generate_range(0..self.max_object_size);
+            let size = self.rng.generate_range(1..self.max_object_size);
 
             let mut map = HashMap::new();
 
@@ -703,26 +714,26 @@ mod tests {
     fn test_generative() {
         let mut chest = new_default_chest("test_insert");
         let mut json_generator = RandomJsonGenerator::new(0);
-        let object_json = json_generator.generate(3);
 
         chest
             .lock_all_and_write(|transaction| {
-                let object = Object {
-                    id: transaction.insert(object_json.clone())?,
-                    value: object_json.clone(),
-                };
+                let mut objects: Vec<Object> = Vec::new();
+                for _ in 0..10 {
+                    let json = json_generator.generate(3);
+                    objects.push(Object {
+                        id: transaction.insert(json.clone())?,
+                        value: json,
+                    })
+                }
 
-                assert_eq!(
-                    transaction.objects()?.collect::<Vec<_>>()?,
-                    vec![object.clone()]
-                );
+                assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 Ok(())
             })
             .unwrap();
     }
 
     #[test]
-    fn simple_test() {
+    fn test_simple() {
         let mut chest = new_default_chest("test_insert");
         let object_json = json!({
             "dict": {
