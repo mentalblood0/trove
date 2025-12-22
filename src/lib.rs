@@ -655,10 +655,25 @@ mod tests {
 
         fn generate_array(&mut self, depth: usize) -> serde_json::Value {
             let size = self.rng.generate_range(1..self.max_array_size);
-
-            let array: Vec<serde_json::Value> =
-                (0..size).map(|_| self.generate(depth - 1)).collect();
-
+            let array: Vec<serde_json::Value> = {
+                let mut result = Vec::new();
+                let mut unique_primitive_values = Vec::new();
+                for _ in 0..size {
+                    let value = self.generate(depth - 1);
+                    match value {
+                        serde_json::Value::Array(_) => {}
+                        serde_json::Value::Object(_) => {}
+                        _ => {
+                            if unique_primitive_values.contains(&value) {
+                                continue;
+                            }
+                            unique_primitive_values.push(value.clone());
+                        }
+                    }
+                    result.push(value);
+                }
+                result
+            };
             serde_json::Value::Array(array)
         }
 
@@ -718,7 +733,7 @@ mod tests {
         chest
             .lock_all_and_write(|transaction| {
                 let mut objects: Vec<Object> = Vec::new();
-                for _ in 0..10 {
+                for _ in 0..100 {
                     let json = json_generator.generate(3);
                     objects.push(Object {
                         id: transaction.insert(json.clone())?,
