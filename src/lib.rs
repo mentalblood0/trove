@@ -103,7 +103,8 @@ fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
 #[derive(bincode::Encode, bincode::Decode, Clone)]
 enum Value {
     Null,
-    Integer(u64),
+    SignedInteger(i64),
+    UnsignedInteger(u64),
     Float(f64),
     Bool(bool),
     String(String),
@@ -116,9 +117,9 @@ impl TryFrom<serde_json::Value> for Value {
         match json_value {
             serde_json::Value::Number(n) => {
                 if let Some(u) = n.as_u64() {
-                    Ok(Value::Integer(u))
+                    Ok(Value::UnsignedInteger(u))
                 } else if let Some(i) = n.as_i64() {
-                    Ok(Value::Integer(i as u64))
+                    Ok(Value::SignedInteger(i as i64))
                 } else if let Some(f) = n.as_f64() {
                     Ok(Value::Float(f))
                 } else {
@@ -138,7 +139,8 @@ impl From<Value> for serde_json::Value {
     fn from(value: Value) -> Self {
         match value {
             Value::Null => serde_json::Value::Null,
-            Value::Integer(i) => serde_json::Value::Number(i.into()),
+            Value::SignedInteger(i) => serde_json::Value::Number(i.into()),
+            Value::UnsignedInteger(i) => serde_json::Value::Number(i.into()),
             Value::Float(f) => serde_json::json!(f),
             Value::Bool(b) => serde_json::Value::Bool(b),
             Value::String(s) => serde_json::Value::String(s),
@@ -574,11 +576,116 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use nanorand::{Rng, WyRand};
     use serde_json::json;
 
     use crate::{Chest, Object};
     use fallible_iterator::FallibleIterator;
     use pretty_assertions::assert_eq;
+
+    struct RandomJsonGenerator {
+        rng: WyRand,
+        max_array_size: usize,
+        max_object_size: usize,
+    }
+
+    impl RandomJsonGenerator {
+        fn new(seed: u64) -> Self {
+            Self {
+                rng: WyRand::new_seed(seed),
+                max_array_size: 10,
+                max_object_size: 10,
+            }
+        }
+
+        fn generate(&mut self, depth: usize) -> serde_json::Value {
+            if depth == 0 {
+                self.generate_primitive()
+            } else {
+                let choice = self.rng.generate_range(0..=7);
+                match choice {
+                    0 => serde_json::Value::Null,
+                    1 => self.generate_bool(),
+                    2 => self.generate_number(),
+                    3 => self.generate_string(),
+                    4 => self.generate_array(depth),
+                    5 => self.generate_object(depth),
+                    _ => self.generate_primitive(),
+                }
+            }
+        }
+
+        fn generate_bool(&mut self) -> serde_json::Value {
+            serde_json::Value::Bool(self.rng.generate())
+        }
+
+        fn generate_number(&mut self) -> serde_json::Value {
+            match self.rng.generate_range(0..3) {
+                0 => json!(self.rng.generate::<i64>() % 1000),
+                1 => json!(self.rng.generate::<f64>() * 1000.0),
+                _ => json!(self.rng.generate::<u64>() % 1000),
+            }
+        }
+
+        fn generate_string(&mut self) -> serde_json::Value {
+            let length = self.rng.generate_range(0..50);
+
+            let chars: Vec<char> = (0..length)
+                .map(|_| {
+                    let c = self.rng.generate_range(32..127) as u8 as char;
+                    c
+                })
+                .collect();
+
+            serde_json::Value::String(chars.iter().collect())
+        }
+
+        fn generate_array(&mut self, depth: usize) -> serde_json::Value {
+            let size = self.rng.generate_range(0..self.max_array_size);
+
+            let array: Vec<serde_json::Value> =
+                (0..size).map(|_| self.generate(depth - 1)).collect();
+
+            serde_json::Value::Array(array)
+        }
+
+        fn generate_object(&mut self, depth: usize) -> serde_json::Value {
+            let size = self.rng.generate_range(0..self.max_object_size);
+
+            let mut map = HashMap::new();
+
+            for _ in 0..size {
+                let key_length = self.rng.generate_range(1..20);
+
+                let key: String = (0..key_length)
+                    .map(|_| {
+                        let choices =
+                            b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+                        let idx = self.rng.generate_range(0..choices.len());
+                        choices[idx] as char
+                    })
+                    .collect();
+
+                let value = self.generate(depth - 1);
+
+                map.insert(key, value);
+            }
+
+            serde_json::Value::Object(serde_json::Map::from_iter(map))
+        }
+
+        fn generate_primitive(&mut self) -> serde_json::Value {
+            match self.rng.generate_range(0..5) {
+                0 => serde_json::Value::Null,
+                1 => serde_json::Value::Bool(self.rng.generate()),
+                2 => json!(self.rng.generate::<i64>() % 1000),
+                3 => json!(self.rng.generate::<f64>() * 1000.0),
+                _ => self.generate_string(),
+            }
+        }
+    }
 
     fn new_default_chest(test_name_for_isolation: &str) -> Chest {
         Chest::new(
@@ -593,7 +700,29 @@ mod tests {
     }
 
     #[test]
-    fn test_insert() {
+    fn test_generative() {
+        let mut chest = new_default_chest("test_insert");
+        let mut json_generator = RandomJsonGenerator::new(0);
+        let object_json = json_generator.generate(3);
+
+        chest
+            .lock_all_and_write(|transaction| {
+                let object = Object {
+                    id: transaction.insert(object_json.clone())?,
+                    value: object_json.clone(),
+                };
+
+                assert_eq!(
+                    transaction.objects()?.collect::<Vec<_>>()?,
+                    vec![object.clone()]
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn simple_test() {
         let mut chest = new_default_chest("test_insert");
         let object_json = json!({
             "dict": {
