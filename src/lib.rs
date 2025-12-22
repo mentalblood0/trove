@@ -58,6 +58,38 @@ fn nest(flat_object: FlatObject) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
+    match nested_object {
+        serde_json::Value::Object(map) => {
+            if map.keys().all(|key| key.parse::<u64>().is_ok()) {
+                let mut pairs = map
+                    .into_iter()
+                    .map(|(key, value)| (key.parse::<u64>().unwrap(), value))
+                    .collect::<Vec<_>>();
+                pairs.sort_by_key(|(key, _)| key.clone());
+                serde_json::Value::Array(
+                    pairs
+                        .into_iter()
+                        .map(|(_, value)| process_arrays(value))
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                serde_json::Value::Object(
+                    map.into_iter()
+                        .map(|(key, value)| (key, process_arrays(value)))
+                        .collect::<serde_json::Map<_, _>>(),
+                )
+            }
+        }
+        serde_json::Value::Array(vec) => serde_json::Value::Array(
+            vec.into_iter()
+                .map(|value| process_arrays(value))
+                .collect::<Vec<_>>(),
+        ),
+        _ => nested_object,
+    }
+}
+
 #[derive(bincode::Encode, bincode::Decode, Clone)]
 enum Value {
     Null,
@@ -319,9 +351,10 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     break;
                 }
             }
+            let nested = nest(flat_object);
             Ok(Some(Object {
                 id: object_id,
-                value: nest(flat_object),
+                value: process_arrays(nested),
             }))
         } else {
             Ok(None)
