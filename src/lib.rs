@@ -724,6 +724,9 @@ mod tests {
                     }
                     result
                 };
+                for object in objects.iter() {
+                    assert_eq!(transaction.get(object.id.clone(), "")?, object.value);
+                }
                 assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 Ok(())
             })
