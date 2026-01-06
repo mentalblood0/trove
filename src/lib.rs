@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
 
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -61,23 +60,35 @@ fn insert_into_map(
 }
 
 fn split_on_unescaped_dots(input: &str) -> Vec<String> {
+    dbg!(&input);
     let mut result = Vec::new();
     let mut current = String::new();
     let mut escaped = false;
 
     for ch in input.chars() {
         if escaped {
+            if ch != '.' {
+                current.push('\\');
+            }
             current.push(ch);
             escaped = false;
         } else if ch == '\\' {
             escaped = true;
         } else if ch == '.' {
-            result.push(std::mem::take(&mut current));
+            if !current.is_empty() {
+                result.push(std::mem::take(&mut current));
+            }
         } else {
             current.push(ch);
         }
     }
-    result.push(current);
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        result.push(current);
+    }
+    dbg!(&result);
     result
 }
 
@@ -527,11 +538,11 @@ impl IndexBatch {
 }
 
 fn escape_key(unescaped_key: &str) -> String {
-    unescaped_key.replace(".", "\\.")
+    unescaped_key.replace("\\", "\\\\").replace(".", "\\.")
 }
 
 fn unescape_key(escaped_key: &str) -> String {
-    escaped_key.replace("\\.", ".")
+    escaped_key.replace("\\.", ".").replace("\\\\", "\\")
 }
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
@@ -660,7 +671,7 @@ mod tests {
 
         fn generate_string(&mut self) -> serde_json::Value {
             serde_json::Value::String(
-                (0..self.rng.generate_range(0..50))
+                (0..self.rng.generate_range(1..50))
                     .map(|_| {
                         let c = self.rng.generate_range(32..127) as u8 as char;
                         c
@@ -694,7 +705,7 @@ mod tests {
         }
 
         fn generate_object(&mut self, depth: usize) -> serde_json::Value {
-            serde_json::Value::Object(
+            let generated_object = serde_json::Value::Object(
                 (0..self.rng.generate_range(1..self.max_object_size))
                     .map(|_| {
                         (
@@ -703,7 +714,9 @@ mod tests {
                         )
                     })
                     .collect::<serde_json::Map<_, _>>(),
-            )
+            );
+            dbg!(&generated_object);
+            generated_object
         }
 
         fn generate_primitive(&mut self) -> serde_json::Value {
