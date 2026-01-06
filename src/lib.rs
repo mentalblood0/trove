@@ -538,11 +538,19 @@ impl IndexBatch {
 }
 
 fn escape_key(unescaped_key: &str) -> String {
-    unescaped_key.replace("\\", "\\\\").replace(".", "\\.")
+    let mut result = unescaped_key.replace(".", "\\.");
+    if result.chars().last() == Some('\\') {
+        result.push('\\');
+    }
+    result
 }
 
 fn unescape_key(escaped_key: &str) -> String {
-    escaped_key.replace("\\.", ".").replace("\\\\", "\\")
+    let mut result = escaped_key.replace("\\.", ".");
+    if result.chars().last() == Some('\\') {
+        result.pop();
+    }
+    result
 }
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
