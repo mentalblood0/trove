@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -39,14 +40,14 @@ fn pad(path: &str) -> String {
 
 fn insert_into_map(
     map: &mut serde_json::Map<String, serde_json::Value>,
-    parts: &[&str],
+    parts: Vec<String>,
     value: serde_json::Value,
 ) {
     if parts.len() == 1 {
         map.insert(parts[0].to_string(), value);
     } else {
         let first = parts[0].to_string();
-        let rest = &parts[1..];
+        let rest = parts[1..].to_vec();
         if !map.contains_key(&first) {
             map.insert(
                 first.clone(),
@@ -59,11 +60,39 @@ fn insert_into_map(
     }
 }
 
+fn split_on_unescaped_dots(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut escaped = false;
+
+    for ch in input.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '.' {
+            result.push(std::mem::take(&mut current));
+        } else {
+            current.push(ch);
+        }
+    }
+    result.push(current);
+    result
+}
+
 fn nest(flat_object: FlatObject) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for (path, value) in flat_object {
-        let parts: Vec<&str> = path.split('.').collect();
-        insert_into_map(&mut map, &parts, value);
+        let parts = split_on_unescaped_dots(&path);
+        insert_into_map(
+            &mut map,
+            parts
+                .iter()
+                .map(|escaped_key| unescape_key(escaped_key))
+                .collect::<Vec<_>>(),
+            value,
+        );
     }
     serde_json::Value::Object(map)
 }
@@ -497,6 +526,14 @@ impl IndexBatch {
     }
 }
 
+fn escape_key(unescaped_key: &str) -> String {
+    unescaped_key.replace(".", "\\.")
+}
+
+fn unescape_key(escaped_key: &str) -> String {
+    escaped_key.replace("\\.", ".")
+}
+
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
 
@@ -510,10 +547,11 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         match value {
             serde_json::Value::Object(map) => {
                 for (key, internal_value) in map {
+                    let escaped_key = escape_key(&key);
                     let internal_path = if path.is_empty() {
-                        key
+                        escaped_key
                     } else {
-                        format!("{path}.{key}")
+                        format!("{path}.{escaped_key}")
                     };
                     self.update_with_index(
                         object_id.clone(),
@@ -713,6 +751,26 @@ mod tests {
                     assert_eq!(transaction.get(object.id.clone(), "")?, object.value);
                 }
                 assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_dots_in_keys() {
+        let mut chest = new_default_chest("test_simple");
+        let object_json = json!({"a.b.c": 1});
+
+        chest
+            .lock_all_and_write(|transaction| {
+                let object = Object {
+                    id: transaction.insert(object_json.clone())?,
+                    value: object_json.clone(),
+                };
+                assert_eq!(
+                    transaction.objects()?.collect::<Vec<_>>()?,
+                    vec![object.clone()]
+                );
                 Ok(())
             })
             .unwrap();
