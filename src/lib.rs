@@ -553,11 +553,12 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 }
             }
             _ => {
-                index_batch.push(path.clone(), value.clone().try_into()?)?;
+                let storable_value: Value = value.try_into()?;
+                index_batch.push(path.clone(), storable_value.clone())?;
                 self.index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
-                    .insert((object_id.clone(), path), value.try_into()?);
+                    .insert((object_id.clone(), path), storable_value);
             }
         }
         Ok(object_id)
