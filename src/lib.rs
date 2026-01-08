@@ -553,6 +553,60 @@ fn unescape_key(escaped_key: &str) -> String {
     result
 }
 
+fn flatten_to(
+    path: &str,
+    value: &serde_json::Value,
+    result: &mut Vec<(String, Value)>,
+) -> Result<()> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, internal_value) in map {
+                let escaped_key = escape_key(&key);
+                let internal_path = if path.is_empty() {
+                    escaped_key
+                } else {
+                    format!("{path}.{escaped_key}")
+                };
+                flatten_to(&internal_path, &internal_value, result)?;
+            }
+        }
+        serde_json::Value::Array(array) => {
+            let mut array_index = 0u64;
+            let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
+            for internal_value in array {
+                match internal_value {
+                    serde_json::Value::Array(_) => {}
+                    serde_json::Value::Object(_) => {}
+                    _ => {
+                        if unique_internal_values.contains(&internal_value) {
+                            continue;
+                        }
+                        unique_internal_values.insert(internal_value.clone());
+                    }
+                }
+                let key = format!("{:0>10}", array_index);
+                let internal_path = if path.is_empty() {
+                    key
+                } else {
+                    format!("{path}.{key}")
+                };
+                flatten_to(&internal_path, &internal_value, result)?;
+                array_index += 1;
+            }
+        }
+        _ => {
+            result.push((path.to_string(), (*value).clone().try_into()?));
+        }
+    }
+    Ok(())
+}
+
+fn flatten(path: &str, value: &serde_json::Value) -> Result<Vec<(String, Value)>> {
+    let mut result: Vec<(String, Value)> = Vec::new();
+    flatten_to(path, value, &mut result)?;
+    Ok(result)
+}
+
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
 
@@ -563,60 +617,12 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         value: serde_json::Value,
         index_batch: &mut IndexBatch,
     ) -> Result<ObjectId> {
-        match value {
-            serde_json::Value::Object(map) => {
-                for (key, internal_value) in map {
-                    let escaped_key = escape_key(&key);
-                    let internal_path = if path.is_empty() {
-                        escaped_key
-                    } else {
-                        format!("{path}.{escaped_key}")
-                    };
-                    self.update_with_index(
-                        object_id.clone(),
-                        internal_path,
-                        internal_value,
-                        index_batch,
-                    )?;
-                }
-            }
-            serde_json::Value::Array(array) => {
-                let mut array_index = 0u64;
-                let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
-                for internal_value in array {
-                    match internal_value {
-                        serde_json::Value::Array(_) => {}
-                        serde_json::Value::Object(_) => {}
-                        _ => {
-                            if unique_internal_values.contains(&internal_value) {
-                                continue;
-                            }
-                            unique_internal_values.insert(internal_value.clone());
-                        }
-                    }
-                    let key = format!("{:0>10}", array_index);
-                    let internal_path = if path.is_empty() {
-                        key
-                    } else {
-                        format!("{path}.{key}")
-                    };
-                    self.update_with_index(
-                        object_id.clone(),
-                        internal_path,
-                        internal_value.clone(),
-                        index_batch,
-                    )?;
-                    array_index += 1;
-                }
-            }
-            _ => {
-                let storable_value: Value = value.try_into()?;
-                index_batch.push(path.clone(), storable_value.clone())?;
-                self.index_transaction
-                    .database_transaction
-                    .object_id_and_path_to_value
-                    .insert((object_id.clone(), path), storable_value);
-            }
+        for (internal_path, internal_value) in flatten(&path, &value)? {
+            index_batch.push(path.clone(), internal_value.clone())?;
+            self.index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .insert((object_id.clone(), internal_path), internal_value);
         }
         Ok(object_id)
     }
