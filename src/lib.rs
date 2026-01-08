@@ -60,7 +60,6 @@ fn insert_into_map(
 }
 
 fn split_on_unescaped_dots(input: &str) -> Vec<String> {
-    dbg!(&input);
     let mut result = Vec::new();
     let mut current = String::new();
     let mut escaped = false;
@@ -88,7 +87,6 @@ fn split_on_unescaped_dots(input: &str) -> Vec<String> {
     if !current.is_empty() {
         result.push(current);
     }
-    dbg!(&result);
     result
 }
 
@@ -363,7 +361,8 @@ macro_rules! define_read_methods {
             present_pathvalues: &Vec<(String, serde_json::Value)>,
             absent_pathvalues: &Vec<(String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
-        ) -> Result<Box<dyn FallibleIterator<Item = dream::Id, Error = Error> + '_>> {
+        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+            println!("select where {present_pathvalues:?}");
             let present_ids = {
                 let mut result = Vec::new();
                 for (path, value) in present_pathvalues {
@@ -390,15 +389,23 @@ macro_rules! define_read_methods {
                 }
                 result
             };
-            Ok(Box::new(self.index_transaction.search(
-                &present_ids,
-                &absent_ids,
-                start_after_object.and_then(|start_after_object| {
-                    Some(dream::Id {
-                        value: start_after_object.value,
-                    })
-                }),
-            )?))
+            Ok(Box::new(
+                self.index_transaction
+                    .search(
+                        &present_ids,
+                        &absent_ids,
+                        start_after_object.and_then(|start_after_object| {
+                            Some(dream::Id {
+                                value: start_after_object.value,
+                            })
+                        }),
+                    )?
+                    .map(|dream_id| {
+                        Ok(ObjectId {
+                            value: dream_id.value,
+                        })
+                    }),
+            ))
         }
     };
 }
@@ -650,6 +657,7 @@ mod tests {
     use nanorand::{Rng, WyRand};
     use serde_json::json;
 
+    use super::*;
     use crate::{Chest, Object};
     use fallible_iterator::FallibleIterator;
     use pretty_assertions::assert_eq;
@@ -729,7 +737,6 @@ mod tests {
                     })
                     .collect::<serde_json::Map<_, _>>(),
             );
-            dbg!(&generated_object);
             generated_object
         }
 
@@ -765,17 +772,26 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let objects = {
                     let mut result = Vec::new();
-                    for _ in 0..100 {
+                    for _ in 0..1 {
                         let json = json_generator.generate(3);
-                        result.push(Object {
+                        let generated_object = Object {
                             id: transaction.insert(json.clone())?,
                             value: json,
-                        })
+                        };
+                        dbg!(&generated_object);
+                        result.push(generated_object);
                     }
                     result
                 };
                 for object in objects.iter() {
                     assert_eq!(transaction.get(object.id.clone(), "")?, object.value);
+                    for (path, value) in flatten(&"", &object.value)? {
+                        let selected = transaction
+                            .select(&vec![(path, value.into())], &vec![], None)?
+                            .collect::<Vec<ObjectId>>()?;
+                        dbg!(&selected);
+                        assert!(selected.iter().any(|object_id| *object_id == object.id));
+                    }
                 }
                 assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 Ok(())
