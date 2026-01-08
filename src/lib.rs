@@ -28,10 +28,9 @@ pub struct Object {
 type FlatObject = Vec<(String, serde_json::Value)>;
 
 fn pad(path: &str) -> String {
-    let re = regex::Regex::new(r"\b\d{1,9}\b").unwrap();
+    let re = regex::Regex::new(r"(:?\.|^)(\d{1,9})(:?\.|$)").unwrap();
     re.replace_all(&path, |caps: &regex::Captures| {
         let segment = caps.get(0).unwrap().as_str();
-
         format!("{:0>10}", segment)
     })
     .to_string()
@@ -322,8 +321,13 @@ macro_rules! define_read_methods {
             })
         }
 
-        pub fn get(&'a self, object_id: ObjectId, path_prefix: &str) -> Result<serde_json::Value> {
+        pub fn get(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &str,
+        ) -> Result<Option<serde_json::Value>> {
             let padded_path_prefix = pad(path_prefix);
+            println!("get {object_id:?} {padded_path_prefix:?}");
             let mut flat_object: FlatObject = Vec::new();
             let mut iterator = self
                 .index_transaction
@@ -331,7 +335,7 @@ macro_rules! define_read_methods {
                 .object_id_and_path_to_value
                 .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
                 .take_while(|entry| {
-                    Ok(entry.0.0 == object_id && entry.0.1.starts_with(&padded_path_prefix))
+                    Ok(entry.0.0 == *object_id && entry.0.1.starts_with(&padded_path_prefix))
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
@@ -348,11 +352,14 @@ macro_rules! define_read_methods {
                     break;
                 }
             }
-            if flat_object.len() == 1 && flat_object[0].0 == "" {
-                Ok(flat_object[0].clone().1)
+            dbg!(&flat_object);
+            if flat_object.is_empty() {
+                Ok(None)
+            } else if flat_object.len() == 1 && flat_object[0].0 == "" {
+                Ok(Some(flat_object[0].clone().1))
             } else {
                 let nested = nest(flat_object);
-                Ok(process_arrays(nested))
+                Ok(Some(process_arrays(nested)))
             }
         }
 
@@ -372,7 +379,6 @@ macro_rules! define_read_methods {
                 }
                 result
             };
-            println!("select where {present_ids:?}");
             let absent_ids = {
                 let mut result = Vec::new();
                 for (path, value) in absent_pathvalues {
@@ -476,7 +482,6 @@ impl IndexBatch {
         let result = dream::Id {
             value: Digest::of_pathvalue(&partitioned_path.base, value)?.value,
         };
-        println!("get dream id {path:?} = {value:?} => {result:?}");
         Ok(result)
     }
 
@@ -516,7 +521,6 @@ impl IndexBatch {
         let id = &dream::Object::Identified(dream::Id {
             value: self.object_id.value,
         });
-        println!("insert {id:?} {:?}", &self.digests);
         index_transaction.insert(id, &self.digests)?;
         for (path_index, path_index_paths_digests) in self.array_digests.iter() {
             index_transaction.insert(
@@ -783,11 +787,19 @@ mod tests {
                     result
                 };
                 for object in objects.iter() {
-                    assert_eq!(transaction.get(object.id.clone(), "")?, object.value);
+                    assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
                     for (path, value) in flatten(&"", &object.value)? {
+                        println!("{:?} {path:?} = {value:?}", &object.id);
+                        let value_as_json: serde_json::Value = value.into();
                         let selected = transaction
-                            .select(&vec![(path, value.into())], &vec![], None)?
+                            .select(&vec![(path.clone(), value_as_json.clone())], &vec![], None)?
                             .collect::<Vec<ObjectId>>()?;
+                        for object_id in selected.iter() {
+                            assert_eq!(
+                                &transaction.get(&object_id, &path)?.unwrap(),
+                                &value_as_json
+                            );
+                        }
                         assert!(selected.iter().any(|object_id| *object_id == object.id));
                     }
                 }
@@ -842,11 +854,11 @@ mod tests {
                 );
 
                 assert_eq!(
-                    &transaction.get(object.id.clone(), "dict")?,
+                    &transaction.get(&object.id, "dict")?.unwrap(),
                     object.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
-                    &transaction.get(object.id.clone(), "dict.hello")?,
+                    &transaction.get(&object.id, "dict.hello")?.unwrap(),
                     object
                         .value
                         .as_object()
@@ -859,7 +871,7 @@ mod tests {
                         .unwrap()
                 );
                 assert_eq!(
-                    &transaction.get(object.id.clone(), "dict.boolean")?,
+                    &transaction.get(&object.id, "dict.boolean")?.unwrap(),
                     object
                         .value
                         .as_object()
@@ -872,7 +884,7 @@ mod tests {
                         .unwrap()
                 );
                 assert_eq!(
-                    transaction.get(object.id.clone(), "dict.hello.0")?,
+                    transaction.get(&object.id, "dict.hello.0")?.unwrap(),
                     object
                         .value
                         .as_object()
@@ -887,7 +899,7 @@ mod tests {
                         .unwrap()[0]
                 );
                 assert_eq!(
-                    transaction.get(object.id.clone(), "dict.hello.1")?,
+                    transaction.get(&object.id, "dict.hello.1")?.unwrap(),
                     object
                         .value
                         .as_object()
@@ -902,7 +914,7 @@ mod tests {
                         .unwrap()[1]
                 );
                 assert_eq!(
-                    transaction.get(object.id.clone(), "dict.hello.2")?,
+                    transaction.get(&object.id, "dict.hello.2")?.unwrap(),
                     object
                         .value
                         .as_object()
@@ -917,7 +929,7 @@ mod tests {
                         .unwrap()[2]
                 );
                 assert_eq!(
-                    transaction.get(object.id.clone(), "dict.hello.3")?,
+                    transaction.get(&object.id, "dict.hello.3")?.unwrap(),
                     object
                         .value
                         .as_object()
