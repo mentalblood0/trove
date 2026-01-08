@@ -138,7 +138,7 @@ fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
     }
 }
 
-#[derive(bincode::Encode, bincode::Decode, Clone)]
+#[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
 enum Value {
     Null,
     Integer(i64),
@@ -242,7 +242,7 @@ impl Digest {
         }
     }
 
-    fn of_path_and_encoded_value(path: &str, value: &Value) -> Result<Self> {
+    fn of_pathvalue(path: &str, value: &Value) -> Result<Self> {
         let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
         let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + encoded_value.len());
         data.extend_from_slice(path.as_bytes());
@@ -362,30 +362,24 @@ macro_rules! define_read_methods {
             absent_pathvalues: &Vec<(String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
         ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            println!("select where {present_pathvalues:?}");
             let present_ids = {
                 let mut result = Vec::new();
                 for (path, value) in present_pathvalues {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_path_and_encoded_value(
-                            path,
-                            &Value::try_from(value.clone())?,
-                        )?
-                        .value,
-                    }));
+                    result.push(dream::Object::Identified(IndexBatch::get_dream_id(
+                        path.clone(),
+                        &(*value).clone().try_into()?,
+                    )?));
                 }
                 result
             };
+            println!("select where {present_ids:?}");
             let absent_ids = {
                 let mut result = Vec::new();
                 for (path, value) in absent_pathvalues {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_path_and_encoded_value(
-                            path,
-                            &Value::try_from(value.clone())?,
-                        )?
-                        .value,
-                    }));
+                    result.push(dream::Object::Identified(IndexBatch::get_dream_id(
+                        path.clone(),
+                        &(*value).clone().try_into()?,
+                    )?));
                 }
                 result
             };
@@ -477,12 +471,23 @@ impl IndexBatch {
         }
     }
 
+    fn get_dream_id(path: String, value: &Value) -> Result<dream::Id> {
+        let partitioned_path = PartitionedPath::from_path(path.clone());
+        let result = dream::Id {
+            value: Digest::of_pathvalue(&partitioned_path.base, value)?.value,
+        };
+        println!("get dream id {path:?} = {value:?} => {result:?}");
+        Ok(result)
+    }
+
     fn push(&mut self, path: String, value: Value) -> Result<&Self> {
+        self.digests
+            .push(dream::Object::Identified(IndexBatch::get_dream_id(
+                path.clone(),
+                &value,
+            )?));
         let partitioned_path = PartitionedPath::from_path(path);
         if let Some(path_index) = partitioned_path.index {
-            self.digests.push(dream::Object::Identified(dream::Id {
-                value: Digest::of_path_and_encoded_value(&partitioned_path.base, &value)?.value,
-            }));
             self.array_digests
                 .entry(path_index)
                 .or_insert(Vec::new())
@@ -494,10 +499,6 @@ impl IndexBatch {
                     )?
                     .value,
                 }));
-        } else {
-            self.digests.push(dream::Object::Identified(dream::Id {
-                value: Digest::of_path_and_encoded_value(&partitioned_path.base, &value)?.value,
-            }));
         }
         Ok(self)
     }
@@ -512,12 +513,11 @@ impl IndexBatch {
         &self,
         index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
     ) -> Result<&Self> {
-        index_transaction.insert(
-            &dream::Object::Identified(dream::Id {
-                value: self.object_id.value,
-            }),
-            &self.digests,
-        )?;
+        let id = &dream::Object::Identified(dream::Id {
+            value: self.object_id.value,
+        });
+        println!("insert {id:?} {:?}", &self.digests);
+        index_transaction.insert(id, &self.digests)?;
         for (path_index, path_index_paths_digests) in self.array_digests.iter() {
             index_transaction.insert(
                 &Self::u64_to_dream_object(*path_index),
@@ -625,7 +625,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         index_batch: &mut IndexBatch,
     ) -> Result<ObjectId> {
         for (internal_path, internal_value) in flatten(&path, &value)? {
-            index_batch.push(path.clone(), internal_value.clone())?;
+            index_batch.push(internal_path.clone(), internal_value.clone())?;
             self.index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
@@ -772,13 +772,12 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let objects = {
                     let mut result = Vec::new();
-                    for _ in 0..1 {
+                    for _ in 0..100 {
                         let json = json_generator.generate(3);
                         let generated_object = Object {
                             id: transaction.insert(json.clone())?,
                             value: json,
                         };
-                        dbg!(&generated_object);
                         result.push(generated_object);
                     }
                     result
@@ -789,7 +788,6 @@ mod tests {
                         let selected = transaction
                             .select(&vec![(path, value.into())], &vec![], None)?
                             .collect::<Vec<ObjectId>>()?;
-                        dbg!(&selected);
                         assert!(selected.iter().any(|object_id| *object_id == object.id));
                     }
                 }
