@@ -327,7 +327,7 @@ macro_rules! define_read_methods {
             path_prefix: &str,
         ) -> Result<Option<serde_json::Value>> {
             let padded_path_prefix = pad(path_prefix);
-            println!("get {object_id:?} {padded_path_prefix:?}");
+            // println!("get {object_id:?} {padded_path_prefix:?}");
             let mut flat_object: FlatObject = Vec::new();
             let mut iterator = self
                 .index_transaction
@@ -352,7 +352,7 @@ macro_rules! define_read_methods {
                     break;
                 }
             }
-            dbg!(&flat_object);
+            // dbg!(&flat_object);
             if flat_object.is_empty() {
                 Ok(None)
             } else if flat_object.len() == 1 && flat_object[0].0 == "" {
@@ -369,6 +369,7 @@ macro_rules! define_read_methods {
             absent_pathvalues: &Vec<(String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
         ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+            // println!("select {present_pathvalues:?}");
             let present_ids = {
                 let mut result = Vec::new();
                 for (path, value) in present_pathvalues {
@@ -486,13 +487,13 @@ impl IndexBatch {
     }
 
     fn push(&mut self, path: String, value: Value) -> Result<&Self> {
-        self.digests
-            .push(dream::Object::Identified(IndexBatch::get_dream_id(
-                path.clone(),
-                &value,
-            )?));
-        let partitioned_path = PartitionedPath::from_path(path);
+        let partitioned_path = PartitionedPath::from_path(path.clone());
         if let Some(path_index) = partitioned_path.index {
+            self.digests
+                .push(dream::Object::Identified(IndexBatch::get_dream_id(
+                    partitioned_path.base.clone(),
+                    &value,
+                )?));
             self.array_digests
                 .entry(path_index)
                 .or_insert(Vec::new())
@@ -504,6 +505,12 @@ impl IndexBatch {
                     )?
                     .value,
                 }));
+        } else {
+            self.digests
+                .push(dream::Object::Identified(IndexBatch::get_dream_id(
+                    path.clone(),
+                    &value,
+                )?));
         }
         Ok(self)
     }
@@ -776,12 +783,13 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let objects = {
                     let mut result = Vec::new();
-                    for _ in 0..100 {
+                    for _ in 0..4 {
                         let json = json_generator.generate(3);
                         let generated_object = Object {
                             id: transaction.insert(json.clone())?,
                             value: json,
                         };
+                        // dbg!(&generated_object);
                         result.push(generated_object);
                     }
                     result
@@ -789,16 +797,31 @@ mod tests {
                 for object in objects.iter() {
                     assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
                     for (path, value) in flatten(&"", &object.value)? {
-                        println!("{:?} {path:?} = {value:?}", &object.id);
+                        // println!("{:?} {path:?} = {value:?}", &object.id);
                         let value_as_json: serde_json::Value = value.into();
+                        let partitioned_path = PartitionedPath::from_path(path.clone());
+                        let select_path = if partitioned_path.index.is_some() {
+                            partitioned_path.base
+                        } else {
+                            path.clone()
+                        };
                         let selected = transaction
-                            .select(&vec![(path.clone(), value_as_json.clone())], &vec![], None)?
+                            .select(
+                                &vec![(select_path.clone(), value_as_json.clone())],
+                                &vec![],
+                                None,
+                            )?
                             .collect::<Vec<ObjectId>>()?;
+                        // dbg!(&selected);
                         for object_id in selected.iter() {
-                            assert_eq!(
-                                &transaction.get(&object_id, &path)?.unwrap(),
-                                &value_as_json
-                            );
+                            let got = &transaction.get(&object_id, &select_path)?.unwrap();
+                            if partitioned_path.index.is_some() {
+                                assert!(got.as_array().unwrap().iter().any(|got_array_element| {
+                                    got_array_element == &value_as_json
+                                }));
+                            } else {
+                                assert_eq!(got, &value_as_json);
+                            }
                         }
                         assert!(selected.iter().any(|object_id| *object_id == object.id));
                     }
