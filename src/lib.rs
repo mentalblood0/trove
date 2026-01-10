@@ -28,10 +28,12 @@ pub struct Object {
 type FlatObject = Vec<(String, serde_json::Value)>;
 
 fn pad(path: &str) -> String {
-    let re = regex::Regex::new(r"(:?\.|^)(\d{1,9})(:?\.|$)").unwrap();
+    let re = regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap();
     re.replace_all(&path, |caps: &regex::Captures| {
-        let segment = caps.get(0).unwrap().as_str();
-        format!("{:0>10}", segment)
+        let start = caps[1].to_string();
+        let index = caps[2].to_string();
+        let end = caps[3].to_string();
+        format!("{start}{:0>10}{end}", index)
     })
     .to_string()
 }
