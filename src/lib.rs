@@ -306,7 +306,7 @@ impl PartitionedPath {
                 index: None,
             }
         };
-        println!("partition path {path:?} as {result:?}");
+        // println!("partition path {path:?} as {result:?}");
         result
     }
 }
@@ -386,7 +386,7 @@ macro_rules! define_read_methods {
             absent_pathvalues: &Vec<(IndexRecordType, String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
         ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            println!("select {present_pathvalues:?}");
+            // println!("select {present_pathvalues:?}");
             let present_ids = {
                 let mut result = Vec::new();
                 for (index_record_type, path, value) in present_pathvalues {
@@ -507,10 +507,10 @@ impl IndexBatch {
         let partitioned_path = PartitionedPath::from_path(path.clone());
         // dbg!(&partitioned_path);
         if let Some(path_index) = partitioned_path.index {
-            println!(
-                "index {:?} = {value:?} for object with id {:?}",
-                partitioned_path.base, self.object_id.value
-            );
+            // println!(
+            //     "index {:?} = {value:?} for object with id {:?}",
+            //     partitioned_path.base, self.object_id.value
+            // );
             self.digests.push(dream::Object::Identified(dream::Id {
                 value: Digest::of_pathvalue(
                     IndexRecordType::Array,
@@ -814,13 +814,13 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let objects = {
                     let mut result = Vec::new();
-                    for _ in 0..5 {
+                    for _ in 0..100 {
                         let json = json_generator.generate(3);
                         let generated_object = Object {
                             id: transaction.insert(json.clone())?,
                             value: json,
                         };
-                        dbg!(&generated_object);
+                        // dbg!(&generated_object);
                         result.push(generated_object);
                     }
                     result
@@ -828,9 +828,14 @@ mod tests {
                 for object in objects.iter() {
                     assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
                     for (path, value) in flatten(&"", &object.value)? {
-                        println!("{:?} {path:?} = {value:?}", &object.id);
+                        // println!("{:?} {path:?} = {value:?}", &object.id);
                         let value_as_json: serde_json::Value = value.into();
                         let partitioned_path = PartitionedPath::from_path(path.clone());
+                        let index_record_type = if partitioned_path.index.is_some() {
+                            IndexRecordType::Array
+                        } else {
+                            IndexRecordType::Direct
+                        };
                         let select_path = if partitioned_path.index.is_some() {
                             partitioned_path.base
                         } else {
@@ -838,7 +843,11 @@ mod tests {
                         };
                         let selected = transaction
                             .select(
-                                &vec![(select_path.clone(), value_as_json.clone())],
+                                &vec![(
+                                    index_record_type,
+                                    select_path.clone(),
+                                    value_as_json.clone(),
+                                )],
                                 &vec![],
                                 None,
                             )?
@@ -848,8 +857,8 @@ mod tests {
                             if let Some(got) = &transaction.get(&object_id, &select_path)? {
                                 if partitioned_path.index.is_some() {
                                     if let Some(got_array) = got.as_array() {
-                                        println!("array for object {:?}:", object_id.value);
-                                        dbg!(&got_array);
+                                        // println!("array for object {:?}:", object_id.value);
+                                        // dbg!(&got_array);
                                         assert!(got_array.iter().any(|got_array_element| {
                                             got_array_element == &value_as_json
                                         }));
