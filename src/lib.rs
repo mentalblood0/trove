@@ -814,66 +814,70 @@ mod tests {
 
         chest
             .lock_all_and_write(|transaction| {
-                let objects = {
-                    let mut result = Vec::new();
-                    for _ in 0..100 {
-                        let json = json_generator.generate(3);
-                        let generated_object = Object {
-                            id: transaction.insert(json.clone())?,
-                            value: json,
-                        };
-                        // dbg!(&generated_object);
-                        result.push(generated_object);
-                    }
-                    result
-                };
-                for object in objects.iter() {
-                    assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
-                    for (path, value) in flatten(&"", &object.value)? {
-                        // println!("{:?} {path:?} = {value:?}", &object.id);
-                        let value_as_json: serde_json::Value = value.into();
-                        let partitioned_path = PartitionedPath::from_path(path.clone());
-                        let index_record_type = if partitioned_path.index.is_some() {
-                            IndexRecordType::Array
-                        } else {
-                            IndexRecordType::Direct
-                        };
-                        let select_path = if partitioned_path.index.is_some() {
-                            partitioned_path.base
-                        } else {
-                            path.clone()
-                        };
-                        let selected = transaction
-                            .select(
-                                &vec![(
-                                    index_record_type,
-                                    select_path.clone(),
-                                    value_as_json.clone(),
-                                )],
-                                &vec![],
-                                None,
-                            )?
-                            .collect::<Vec<ObjectId>>()?;
-                        // dbg!(&selected);
-                        for object_id in selected.iter() {
-                            if let Some(got) = &transaction.get(&object_id, &select_path)? {
-                                if partitioned_path.index.is_some() {
-                                    if let Some(got_array) = got.as_array() {
-                                        // println!("array for object {:?}:", object_id.value);
-                                        // dbg!(&got_array);
-                                        assert!(got_array.iter().any(|got_array_element| {
-                                            got_array_element == &value_as_json
-                                        }));
+                let mut objects: Vec<Object> = Vec::new();
+                for _ in 0..10 {
+                    let new_objects = {
+                        let mut result = Vec::new();
+                        for _ in 0..10 {
+                            let json = json_generator.generate(3);
+                            let generated_object = Object {
+                                id: transaction.insert(json.clone())?,
+                                value: json,
+                            };
+                            // dbg!(&generated_object);
+                            result.push(generated_object);
+                        }
+                        result
+                    };
+                    for object in new_objects.iter() {
+                        assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
+                        for (path, value) in flatten(&"", &object.value)? {
+                            // println!("{:?} {path:?} = {value:?}", &object.id);
+                            let value_as_json: serde_json::Value = value.into();
+                            let partitioned_path = PartitionedPath::from_path(path.clone());
+                            let index_record_type = if partitioned_path.index.is_some() {
+                                IndexRecordType::Array
+                            } else {
+                                IndexRecordType::Direct
+                            };
+                            let select_path = if partitioned_path.index.is_some() {
+                                partitioned_path.base
+                            } else {
+                                path.clone()
+                            };
+                            let selected = transaction
+                                .select(
+                                    &vec![(
+                                        index_record_type,
+                                        select_path.clone(),
+                                        value_as_json.clone(),
+                                    )],
+                                    &vec![],
+                                    None,
+                                )?
+                                .collect::<Vec<ObjectId>>()?;
+                            // dbg!(&selected);
+                            for object_id in selected.iter() {
+                                if let Some(got) = &transaction.get(&object_id, &select_path)? {
+                                    if partitioned_path.index.is_some() {
+                                        if let Some(got_array) = got.as_array() {
+                                            // println!("array for object {:?}:", object_id.value);
+                                            // dbg!(&got_array);
+                                            assert!(got_array.iter().any(|got_array_element| {
+                                                got_array_element == &value_as_json
+                                            }));
+                                        }
+                                    } else {
+                                        assert_eq!(got, &value_as_json);
                                     }
-                                } else {
-                                    assert_eq!(got, &value_as_json);
                                 }
                             }
+                            assert!(selected.iter().any(|object_id| *object_id == object.id));
                         }
-                        assert!(selected.iter().any(|object_id| *object_id == object.id));
                     }
+                    objects.extend(new_objects);
+                    assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 }
-                assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 Ok(())
             })
             .unwrap();
