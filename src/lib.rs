@@ -691,10 +691,35 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         let id = ObjectId::new();
         self.update(id.clone(), "".to_string(), value)
     }
+
+    pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &str) -> Result<()> {
+        let padded_path_prefix = pad(path_prefix);
+        let paths_to_remove = self
+            .index_transaction
+            .database_transaction
+            .object_id_and_path_to_value
+            .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
+            .map(|(current_object_id_and_path, _)| Ok(current_object_id_and_path))
+            .take_while(|(current_object_id, current_path)| {
+                Ok(*current_object_id == *object_id
+                    && current_path.starts_with(&padded_path_prefix))
+            })
+            .map(|(_, current_path)| Ok(current_path))
+            .collect::<Vec<_>>()?;
+        for current_path in paths_to_remove.into_iter() {
+            self.index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .remove(&(object_id.clone(), current_path));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use nanorand::{Rng, WyRand};
     use serde_json::json;
 
@@ -810,73 +835,105 @@ mod tests {
     #[test]
     fn test_generative() {
         let mut chest = new_default_chest("test_generative");
+        let mut rng = WyRand::new_seed(0);
         let mut json_generator = RandomJsonGenerator::new(0);
 
         chest
             .lock_all_and_write(|transaction| {
-                let mut objects: Vec<Object> = Vec::new();
+                let mut previously_added_objects: BTreeMap<ObjectId, serde_json::Value> =
+                    BTreeMap::new();
                 for _ in 0..10 {
-                    let new_objects = {
-                        let mut result = Vec::new();
-                        for _ in 0..10 {
-                            let json = json_generator.generate(3);
-                            let generated_object = Object {
-                                id: transaction.insert(json.clone())?,
-                                value: json,
-                            };
-                            // dbg!(&generated_object);
-                            result.push(generated_object);
-                        }
-                        result
+                    let action_id = if previously_added_objects.is_empty() {
+                        1
+                    } else {
+                        rng.generate_range(1..=2)
                     };
-                    for object in new_objects.iter() {
-                        assert_eq!(transaction.get(&object.id, "")?.unwrap(), object.value);
-                        for (path, value) in flatten(&"", &object.value)? {
-                            // println!("{:?} {path:?} = {value:?}", &object.id);
-                            let value_as_json: serde_json::Value = value.into();
-                            let partitioned_path = PartitionedPath::from_path(path.clone());
-                            let index_record_type = if partitioned_path.index.is_some() {
-                                IndexRecordType::Array
-                            } else {
-                                IndexRecordType::Direct
-                            };
-                            let select_path = if partitioned_path.index.is_some() {
-                                partitioned_path.base
-                            } else {
-                                path.clone()
-                            };
-                            let selected = transaction
-                                .select(
-                                    &vec![(
-                                        index_record_type,
-                                        select_path.clone(),
-                                        value_as_json.clone(),
-                                    )],
-                                    &vec![],
-                                    None,
-                                )?
-                                .collect::<Vec<ObjectId>>()?;
-                            // dbg!(&selected);
-                            for object_id in selected.iter() {
-                                if let Some(got) = &transaction.get(&object_id, &select_path)? {
-                                    if partitioned_path.index.is_some() {
-                                        if let Some(got_array) = got.as_array() {
-                                            // println!("array for object {:?}:", object_id.value);
-                                            // dbg!(&got_array);
-                                            assert!(got_array.iter().any(|got_array_element| {
-                                                got_array_element == &value_as_json
-                                            }));
-                                        }
+                    match action_id {
+                        1 => {
+                            let new_objects = (0..10)
+                                .map(|_| {
+                                    let json = json_generator.generate(3);
+                                    (transaction.insert(json.clone()).unwrap(), json)
+                                })
+                                .collect::<Vec<_>>();
+                            for (object_id, object_value) in new_objects.iter() {
+                                assert_eq!(
+                                    transaction.get(&object_id, "")?.unwrap(),
+                                    *object_value
+                                );
+                                for (path, value) in flatten(&"", &object_value)? {
+                                    // println!("{:?} {path:?} = {value:?}", &object.id);
+                                    let value_as_json: serde_json::Value = value.into();
+                                    let partitioned_path = PartitionedPath::from_path(path.clone());
+                                    let index_record_type = if partitioned_path.index.is_some() {
+                                        IndexRecordType::Array
                                     } else {
-                                        assert_eq!(got, &value_as_json);
+                                        IndexRecordType::Direct
+                                    };
+                                    let select_path = if partitioned_path.index.is_some() {
+                                        partitioned_path.base
+                                    } else {
+                                        path.clone()
+                                    };
+                                    let selected = transaction
+                                        .select(
+                                            &vec![(
+                                                index_record_type,
+                                                select_path.clone(),
+                                                value_as_json.clone(),
+                                            )],
+                                            &vec![],
+                                            None,
+                                        )?
+                                        .collect::<Vec<ObjectId>>()?;
+                                    // dbg!(&selected);
+                                    for selected_object_id in selected.iter() {
+                                        if let Some(got) =
+                                            &transaction.get(&selected_object_id, &select_path)?
+                                        {
+                                            if partitioned_path.index.is_some() {
+                                                if let Some(got_array) = got.as_array() {
+                                                    // println!("array for object {:?}:", selected_object_id.value);
+                                                    // dbg!(&got_array);
+                                                    assert!(got_array.iter().any(
+                                                        |got_array_element| {
+                                                            got_array_element == &value_as_json
+                                                        }
+                                                    ));
+                                                }
+                                            } else {
+                                                assert_eq!(got, &value_as_json);
+                                            }
+                                        }
                                     }
+                                    assert!(selected.iter().any(|selected_object_id| {
+                                        selected_object_id == object_id
+                                    }));
                                 }
                             }
-                            assert!(selected.iter().any(|object_id| *object_id == object.id));
+                            previously_added_objects.extend(new_objects);
+                            assert_eq!(
+                                transaction
+                                    .objects()?
+                                    .map(|current_object| Ok((
+                                        current_object.id,
+                                        current_object.value
+                                    )))
+                                    .collect::<BTreeMap<_, _>>()?,
+                                previously_added_objects
+                            );
+                        }
+                        _ => {
+                            let object_to_remove_id = previously_added_objects
+                                .keys()
+                                .nth(rng.generate_range(0..previously_added_objects.len()))
+                                .unwrap()
+                                .clone();
+                            transaction.remove(&object_to_remove_id, "")?;
+                            previously_added_objects.remove(&object_to_remove_id);
+                            assert_eq!(transaction.get(&object_to_remove_id, "")?, None);
                         }
                     }
-                    objects.extend(new_objects);
-                    assert_eq!(transaction.objects()?.collect::<Vec<_>>()?, objects);
                 }
                 Ok(())
             })
