@@ -43,19 +43,25 @@ fn insert_into_map(
     parts: Vec<String>,
     value: serde_json::Value,
 ) {
-    if parts.len() == 1 {
-        map.insert(parts[0].to_string(), value);
-    } else {
-        let first = parts[0].to_string();
-        let rest = parts[1..].to_vec();
-        if !map.contains_key(&first) {
-            map.insert(
-                first.clone(),
-                serde_json::Value::Object(serde_json::Map::new()),
-            );
+    match parts.len() {
+        0 => {
+            map.insert("".to_string(), value);
         }
-        if let Some(serde_json::Value::Object(nested_map)) = map.get_mut(&first) {
-            insert_into_map(nested_map, rest, value);
+        1 => {
+            map.insert(parts[0].to_string(), value);
+        }
+        _ => {
+            let first = parts[0].to_string();
+            let rest = parts[1..].to_vec();
+            if !map.contains_key(&first) {
+                map.insert(
+                    first.clone(),
+                    serde_json::Value::Object(serde_json::Map::new()),
+                );
+            }
+            if let Some(serde_json::Value::Object(nested_map)) = map.get_mut(&first) {
+                insert_into_map(nested_map, rest, value);
+            }
         }
     }
 }
@@ -91,20 +97,27 @@ fn split_on_unescaped_dots(input: &str) -> Vec<String> {
     result
 }
 
-fn nest(flat_object: FlatObject) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    for (path, value) in flat_object {
-        let parts = split_on_unescaped_dots(&path);
-        insert_into_map(
-            &mut map,
-            parts
-                .iter()
-                .map(|escaped_key| unescape_key(escaped_key))
-                .collect::<Vec<_>>(),
-            value,
-        );
+fn nest(flat_object: FlatObject) -> Option<serde_json::Value> {
+    if flat_object.is_empty() {
+        None
+    } else if flat_object.len() == 1 && flat_object[0].0 == "" {
+        Some(flat_object[0].clone().1)
+    } else {
+        let mut map = serde_json::Map::new();
+        for (path, value) in flat_object {
+            let parts = split_on_unescaped_dots(&path);
+            insert_into_map(
+                &mut map,
+                parts
+                    .iter()
+                    .map(|escaped_key| unescape_key(escaped_key))
+                    .collect::<Vec<_>>(),
+                value,
+            );
+        }
+        let nested = serde_json::Value::Object(map);
+        Some(process_arrays(nested))
     }
-    serde_json::Value::Object(map)
 }
 
 fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
@@ -308,7 +321,6 @@ impl PartitionedPath {
                 index: None,
             }
         };
-        // println!("partition path {path:?} as {result:?}");
         result
     }
 }
@@ -340,13 +352,12 @@ macro_rules! define_read_methods {
             })
         }
 
-        pub fn get(
+        pub fn get_flattened(
             &'a self,
             object_id: &ObjectId,
             path_prefix: &str,
-        ) -> Result<Option<serde_json::Value>> {
+        ) -> Result<FlatObject> {
             let padded_path_prefix = pad(path_prefix);
-            // println!("get {object_id:?} {padded_path_prefix:?}");
             let mut flat_object: FlatObject = Vec::new();
             let mut iterator = self
                 .index_transaction
@@ -371,15 +382,15 @@ macro_rules! define_read_methods {
                     break;
                 }
             }
-            // dbg!(&flat_object);
-            if flat_object.is_empty() {
-                Ok(None)
-            } else if flat_object.len() == 1 && flat_object[0].0 == "" {
-                Ok(Some(flat_object[0].clone().1))
-            } else {
-                let nested = nest(flat_object);
-                Ok(Some(process_arrays(nested)))
-            }
+            Ok(flat_object)
+        }
+
+        pub fn get(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &str,
+        ) -> Result<Option<serde_json::Value>> {
+            Ok(nest(self.get_flattened(object_id, path_prefix)?))
         }
 
         pub fn select(
@@ -388,7 +399,6 @@ macro_rules! define_read_methods {
             absent_pathvalues: &Vec<(IndexRecordType, String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
         ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            // println!("select {present_pathvalues:?}");
             let present_ids = {
                 let mut result = Vec::new();
                 for (index_record_type, path, value) in present_pathvalues {
@@ -471,19 +481,12 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     break;
                 }
             }
-            if flat_object.len() == 1 && flat_object[0].0 == "" {
-                Ok(Some(Object {
+            Ok(nest(flat_object).and_then(|value| {
+                Some(Object {
                     id: object_id,
-                    value: flat_object[0].clone().1,
-                }))
-            } else {
-                let nested = nest(flat_object);
-                let processed = process_arrays(nested);
-                Ok(Some(Object {
-                    id: object_id,
-                    value: processed,
-                }))
-            }
+                    value,
+                })
+            }))
         } else {
             Ok(None)
         }
@@ -507,12 +510,7 @@ impl IndexBatch {
 
     fn push(&mut self, path: String, value: Value) -> Result<&Self> {
         let partitioned_path = PartitionedPath::from_path(path.clone());
-        // dbg!(&partitioned_path);
         if let Some(path_index) = partitioned_path.index {
-            // println!(
-            //     "index {:?} = {value:?} for object with id {:?}",
-            //     partitioned_path.base, self.object_id.value
-            // );
             self.digests.push(dream::Object::Identified(dream::Id {
                 value: Digest::of_pathvalue(
                     IndexRecordType::Array,
@@ -692,6 +690,10 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         self.update(id.clone(), "".to_string(), value)
     }
 
+    pub fn insert_with_id(&mut self, object: Object) -> Result<ObjectId> {
+        self.update(object.id, "".to_string(), object.value)
+    }
+
     pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &str) -> Result<()> {
         let padded_path_prefix = pad(path_prefix);
         let paths_to_remove = self
@@ -842,15 +844,15 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let mut previously_added_objects: BTreeMap<ObjectId, serde_json::Value> =
                     BTreeMap::new();
-                for _ in 0..10 {
+                for _ in 0..100 {
                     let action_id = if previously_added_objects.is_empty() {
                         1
                     } else {
-                        rng.generate_range(1..=2)
+                        rng.generate_range(1..=3)
                     };
                     match action_id {
                         1 => {
-                            let new_objects = (0..10)
+                            let new_objects = (0..1)
                                 .map(|_| {
                                     let json = json_generator.generate(3);
                                     (transaction.insert(json.clone()).unwrap(), json)
@@ -862,7 +864,6 @@ mod tests {
                                     *object_value
                                 );
                                 for (path, value) in flatten(&"", &object_value)? {
-                                    // println!("{:?} {path:?} = {value:?}", &object.id);
                                     let value_as_json: serde_json::Value = value.into();
                                     let partitioned_path = PartitionedPath::from_path(path.clone());
                                     let index_record_type = if partitioned_path.index.is_some() {
@@ -886,15 +887,12 @@ mod tests {
                                             None,
                                         )?
                                         .collect::<Vec<ObjectId>>()?;
-                                    // dbg!(&selected);
                                     for selected_object_id in selected.iter() {
                                         if let Some(got) =
                                             &transaction.get(&selected_object_id, &select_path)?
                                         {
                                             if partitioned_path.index.is_some() {
                                                 if let Some(got_array) = got.as_array() {
-                                                    // println!("array for object {:?}:", selected_object_id.value);
-                                                    // dbg!(&got_array);
                                                     assert!(got_array.iter().any(
                                                         |got_array_element| {
                                                             got_array_element == &value_as_json
@@ -923,7 +921,7 @@ mod tests {
                                 previously_added_objects
                             );
                         }
-                        _ => {
+                        2 => {
                             let object_to_remove_id = previously_added_objects
                                 .keys()
                                 .nth(rng.generate_range(0..previously_added_objects.len()))
@@ -933,6 +931,43 @@ mod tests {
                             previously_added_objects.remove(&object_to_remove_id);
                             assert_eq!(transaction.get(&object_to_remove_id, "")?, None);
                         }
+                        3 => {
+                            let object_to_remove_from_id = previously_added_objects
+                                .keys()
+                                .nth(rng.generate_range(0..previously_added_objects.len()))
+                                .unwrap()
+                                .clone();
+                            let flattened_object_to_remove_from =
+                                transaction.get_flattened(&object_to_remove_from_id, "")?;
+                            let path_to_remove = flattened_object_to_remove_from
+                                [rng.generate_range(0..flattened_object_to_remove_from.len())]
+                            .0
+                            .clone();
+                            let correct_result_option = nest(
+                                flattened_object_to_remove_from
+                                    .into_iter()
+                                    .filter(|(path, _)| !path.starts_with(&path_to_remove))
+                                    .map(|(path, value)| (path, value.into()))
+                                    .collect::<Vec<_>>(),
+                            );
+                            transaction.remove(&object_to_remove_from_id, &path_to_remove)?;
+                            previously_added_objects.remove(&object_to_remove_from_id);
+                            if let Some(ref correct_result) = correct_result_option {
+                                previously_added_objects.insert(
+                                    object_to_remove_from_id.clone(),
+                                    correct_result.clone(),
+                                );
+                            }
+                            assert_eq!(
+                                transaction.get(&object_to_remove_from_id, &path_to_remove)?,
+                                None
+                            );
+                            assert_eq!(
+                                transaction.get(&object_to_remove_from_id, "")?,
+                                correct_result_option
+                            );
+                        }
+                        _ => {}
                     }
                 }
                 Ok(())
