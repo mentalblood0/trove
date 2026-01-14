@@ -701,19 +701,20 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .database_transaction
             .object_id_and_path_to_value
             .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
-            .map(|(current_object_id_and_path, _)| Ok(current_object_id_and_path))
-            .take_while(|(current_object_id, current_path)| {
+            .take_while(|((current_object_id, current_path), _)| {
                 Ok(*current_object_id == *object_id
                     && current_path.starts_with(&padded_path_prefix))
             })
-            .map(|(_, current_path)| Ok(current_path))
             .collect::<Vec<_>>()?;
-        for current_path in paths_to_remove.into_iter() {
+        let mut index_batch = IndexBatch::new(object_id.clone());
+        for ((_, current_path), current_value) in paths_to_remove.into_iter() {
             self.index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
-                .remove(&(object_id.clone(), current_path));
+                .remove(&(object_id.clone(), current_path.clone()));
+            index_batch.push(current_path, current_value)?;
         }
+        index_batch.flush_remove(self.index_transaction)?;
         Ok(())
     }
 }
@@ -844,7 +845,7 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let mut previously_added_objects: BTreeMap<ObjectId, serde_json::Value> =
                     BTreeMap::new();
-                for _ in 0..100 {
+                for _ in 0..300 {
                     let action_id = if previously_added_objects.is_empty() {
                         1
                     } else {
