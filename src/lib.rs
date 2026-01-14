@@ -358,6 +358,7 @@ macro_rules! define_read_methods {
             path_prefix: &str,
         ) -> Result<FlatObject> {
             let padded_path_prefix = pad(path_prefix);
+            let padded_path_prefix_with_dot = padded_path_prefix.clone() + ".";
             let mut flat_object: FlatObject = Vec::new();
             let mut iterator = self
                 .index_transaction
@@ -365,7 +366,10 @@ macro_rules! define_read_methods {
                 .object_id_and_path_to_value
                 .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
                 .take_while(|entry| {
-                    Ok(entry.0.0 == *object_id && entry.0.1.starts_with(&padded_path_prefix))
+                    Ok(entry.0.0 == *object_id
+                        && (padded_path_prefix == ""
+                            || entry.0.1 == padded_path_prefix
+                            || entry.0.1.starts_with(&padded_path_prefix_with_dot)))
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
