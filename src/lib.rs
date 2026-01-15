@@ -131,7 +131,7 @@ fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
         serde_json::Value::Object(map) => {
             if let Ok(mut pairs) =
                 fallible_iterator::convert(map.iter().map(|keyvalue| Ok::<_, Error>(keyvalue)))
-                    .map(|(key, value)| Ok((key.parse::<u64>()?, value.clone())))
+                    .map(|(key, value)| Ok((key.parse::<u32>()?, value.clone())))
                     .collect::<Vec<_>>()
             {
                 pairs.sort_by_key(|(key, _)| key.clone());
@@ -298,19 +298,19 @@ impl Digest {
 #[derive(Debug)]
 struct PartitionedPath {
     base: String,
-    index: Option<u64>,
+    index: Option<u32>,
 }
 
 impl PartitionedPath {
     fn from_path(path: String) -> Self {
-        let result = if let Ok(index) = path.parse::<u64>() {
+        let result = if let Ok(index) = path.parse::<u32>() {
             Self {
                 base: "".to_string(),
                 index: Some(index),
             }
         } else if let Some(dot_position) = path.rfind('.') {
             let (base, index_string) = path.split_at(dot_position);
-            if let Ok(index) = index_string[1..].parse::<u64>() {
+            if let Ok(index) = index_string[1..].parse::<u32>() {
                 Self {
                     base: base.to_string(),
                     index: Some(index),
@@ -507,7 +507,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
 struct IndexBatch {
     object_id: ObjectId,
     digests: Vec<dream::Object>,
-    array_digests: HashMap<u64, Vec<dream::Object>>,
+    array_digests: HashMap<u32, Vec<dream::Object>>,
 }
 
 impl IndexBatch {
@@ -549,9 +549,9 @@ impl IndexBatch {
         Ok(self)
     }
 
-    fn u64_to_dream_id(input: u64) -> dream::Id {
+    fn u32_to_dream_id(input: u32) -> dream::Id {
         let mut value = [0u8; 16];
-        value[8..].copy_from_slice(&input.to_be_bytes());
+        value[12..].copy_from_slice(&input.to_be_bytes());
         dream::Id { value }
     }
 
@@ -566,7 +566,7 @@ impl IndexBatch {
             .into_iter()
             .chain(self.array_digests.iter().map(
                 |(path_index, path_index_paths_digests)| {
-                    (Self::u64_to_dream_id(*path_index), path_index_paths_digests)
+                    (Self::u32_to_dream_id(*path_index), path_index_paths_digests)
                 },
             )),
         )
@@ -620,7 +620,7 @@ fn flatten_to(
             }
         }
         serde_json::Value::Array(array) => {
-            let mut array_index = 0u64;
+            let mut array_index = 0u32;
             let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
             for internal_value in array {
                 match internal_value {
@@ -772,7 +772,7 @@ mod tests {
                         c
                     })
                     .collect();
-                if result.parse::<u64>().is_err() {
+                if result.parse::<u32>().is_err() {
                     return serde_json::Value::String(result);
                 }
             }
