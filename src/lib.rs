@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use anyhow::{Error, Result, anyhow};
+use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
 
@@ -30,10 +30,8 @@ type FlatObject = Vec<(String, serde_json::Value)>;
 
 fn pad(path: &str) -> String {
     static REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    REGEX.get_or_init(|| regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap());
     REGEX
-        .get()
-        .unwrap()
+        .get_or_init(|| regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap())
         .replace_all(&path, |caps: &regex::Captures| {
             let start = caps[1].to_string();
             let index = caps[2].to_string();
@@ -220,7 +218,9 @@ pub struct ChestConfig {
 impl Chest {
     pub fn new(config: ChestConfig) -> Result<Self> {
         Ok(Self {
-            index: trove_database::Index::new(config.index)?,
+            index: trove_database::Index::new(config.index.clone()).with_context(|| {
+                format!("Can not create chest with index config {:?}", config.index)
+            })?,
         })
     }
 
@@ -228,11 +228,13 @@ impl Chest {
     where
         F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<()>,
     {
-        self.index.lock_all_and_write(|index_write_transaction| {
-            f(&mut WriteTransaction {
-                index_transaction: index_write_transaction,
+        self.index
+            .lock_all_and_write(|index_write_transaction| {
+                f(&mut WriteTransaction {
+                    index_transaction: index_write_transaction,
+                })
             })
-        })?;
+            .with_context(|| "Can not lock index and initiate write transaction")?;
 
         Ok(self)
     }
@@ -246,7 +248,10 @@ impl Chest {
                 f(ReadTransaction {
                     index_transaction: index_read_transaction,
                 })
-            })?;
+            })
+            .with_context(
+                || "Can not lock all write operations on index and initiate read transaction",
+            )?;
         Ok(self)
     }
 }
@@ -270,7 +275,8 @@ impl Digest {
     }
 
     fn of_pathvalue(index_record_type: IndexRecordType, path: &str, value: &Value) -> Result<Self> {
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
+        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
+            .with_context(|| format!("Can not binary encode value {value:?}"))?;
         let mut data: Vec<u8> = Vec::with_capacity(2 + path.len() + 1 + encoded_value.len());
         data.push(index_record_type as u8);
         data.push(0);
@@ -285,7 +291,8 @@ impl Digest {
         object_id: &ObjectId,
         value: &Value,
     ) -> Result<Self> {
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())?;
+        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
+            .with_context(|| format!("Can not binary encode value {value:?}"))?;
         let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + 16 + encoded_value.len());
         data.extend_from_slice(path.as_bytes());
         data.push(0u8);
@@ -353,7 +360,10 @@ macro_rules! define_read_methods {
                     .index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
-                    .iter(None)?,
+                    .iter(None)
+                    .with_context(
+                        || "Can not initiate iteration over object_id_and_path_to_value table",
+                    )?,
                 last_entry: None,
             })
         }
@@ -366,11 +376,16 @@ macro_rules! define_read_methods {
             let padded_path_prefix = pad(path_prefix);
             let padded_path_prefix_with_dot = padded_path_prefix.clone() + ".";
             let mut flat_object: FlatObject = Vec::new();
+            let from_object_id_and_path =
+                Some(&(object_id.clone(), padded_path_prefix.to_string()));
             let mut iterator = self
                 .index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
-                .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
+                .iter(from_object_id_and_path)
+                .with_context(
+                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
+                )?
                 .take_while(|entry| {
                     Ok(entry.0.0 == *object_id
                         && (padded_path_prefix == ""
@@ -401,24 +416,24 @@ macro_rules! define_read_methods {
             object_id: &ObjectId,
             path_prefix: &str,
         ) -> Result<Option<serde_json::Value>> {
-            Ok(nest(self.get_flattened(object_id, path_prefix)?))
+            Ok(nest(self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?))
         }
 
         pub fn select(
             &'a self,
-            present_pathvalues: &Vec<(IndexRecordType, String, serde_json::Value)>,
-            absent_pathvalues: &Vec<(IndexRecordType, String, serde_json::Value)>,
+            presention_conditions: &Vec<(IndexRecordType, String, serde_json::Value)>,
+            absention_conditions: &Vec<(IndexRecordType, String, serde_json::Value)>,
             start_after_object: Option<ObjectId>,
         ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
             let present_ids = {
                 let mut result = Vec::new();
-                for (index_record_type, path, value) in present_pathvalues {
+                for (index_record_type, path, value) in presention_conditions {
                     result.push(dream::Object::Identified(dream::Id {
                         value: Digest::of_pathvalue(
                             index_record_type.clone(),
                             &path,
-                            &value.clone().try_into()?,
-                        )?
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
+                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
                         .value,
                     }));
                 }
@@ -426,13 +441,13 @@ macro_rules! define_read_methods {
             };
             let absent_ids = {
                 let mut result = Vec::new();
-                for (index_record_type, path, value) in absent_pathvalues {
+                for (index_record_type, path, value) in absention_conditions {
                     result.push(dream::Object::Identified(dream::Id {
                         value: Digest::of_pathvalue(
                             index_record_type.clone(),
                             &path,
-                            &value.clone().try_into()?,
-                        )?
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
+                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
                         .value,
                     }));
                 }
@@ -448,7 +463,7 @@ macro_rules! define_read_methods {
                                 value: start_after_object.value,
                             })
                         }),
-                    )?
+                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
                     .map(|dream_id| {
                         Ok(ObjectId {
                             value: dream_id.value,
@@ -469,7 +484,10 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
 
     fn next(&mut self) -> Result<Option<Self::Item>> {
         if self.last_entry.is_none() {
-            self.last_entry = self.data_table_iterator.next()?;
+            self.last_entry = self
+                .data_table_iterator
+                .next()
+                .with_context(|| "Can not get first data table entry")?;
         }
         if let Some(first_object_entry) = self.last_entry.clone() {
             let object_id = first_object_entry.0.0;
@@ -479,7 +497,12 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                 serde_json::Value::from(first_object_entry.1),
             ));
             loop {
-                self.last_entry = self.data_table_iterator.next()?;
+                self.last_entry = self.data_table_iterator.next().with_context(|| {
+                    format!(
+                        "Can not get next data table entry after {:?}",
+                        self.last_entry
+                    )
+                })?;
                 if let Some(current_entry) = &self.last_entry {
                     if current_entry.0.0 != object_id {
                         break;
@@ -504,6 +527,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 struct IndexBatch {
     object_id: ObjectId,
     digests: Vec<dream::Object>,
@@ -527,7 +551,13 @@ impl IndexBatch {
                     IndexRecordType::Array,
                     &partitioned_path.base,
                     &value.clone(),
-                )?
+                )
+                .with_context(|| {
+                    format!(
+                        "Can not compute array type digest for path {:?} and value {:?}",
+                        partitioned_path.base, value
+                    )
+                })?
                 .value,
             }));
             self.array_digests
@@ -538,12 +568,24 @@ impl IndexBatch {
                         &partitioned_path.base,
                         &self.object_id,
                         &value,
-                    )?
+                ).with_context(|| {
+                    format!(
+                        "Can not compute array type digest for path {:?}, object id {:?} and value {:?}",
+                        partitioned_path.base, self.object_id, value
+                    )
+                })?
                     .value,
                 }));
         } else {
             self.digests.push(dream::Object::Identified(dream::Id {
-                value: Digest::of_pathvalue(IndexRecordType::Direct, &path, &value.clone())?.value,
+                value: Digest::of_pathvalue(IndexRecordType::Direct, &path, &value.clone())
+                    .with_context(|| {
+                        format!(
+                            "Can not compute direct type digest for path {:?} and value {:?}",
+                            path, value
+                        )
+                    })?
+                    .value,
             }));
         }
         Ok(self)
@@ -577,7 +619,11 @@ impl IndexBatch {
         index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
     ) -> Result<&Self> {
         for (dream_id, tags) in self.iter() {
-            index_transaction.insert(&dream::Object::Identified(dream_id), tags)?;
+            index_transaction
+                .insert(&dream::Object::Identified(dream_id.clone()), tags)
+                .with_context(|| {
+                    format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
+                })?;
         }
         Ok(self)
     }
@@ -588,7 +634,8 @@ impl IndexBatch {
     ) -> Result<&Self> {
         for (dream_id, tags) in self.iter() {
             index_transaction
-                .remove_tags_from_object(&dream::Object::Identified(dream_id), tags)?;
+                .remove_tags_from_object(&dream::Object::Identified(dream_id.clone()), tags)
+                .with_context(|| format!("Can not remove tags {tags:?} from object with id {dream_id:?} in dream index"))?;
         }
         Ok(self)
     }
@@ -616,7 +663,9 @@ fn flatten_to(
                 } else {
                     format!("{path}.{escaped_key}")
                 };
-                flatten_to(&internal_path, &internal_value, result)?;
+                flatten_to(&internal_path, &internal_value, result).with_context(|| {
+                    format!("Can not get flat representation of value {internal_value:?} part at path {internal_path:?}")
+                })?;
             }
         }
         serde_json::Value::Array(array) => {
@@ -639,13 +688,20 @@ fn flatten_to(
                 } else {
                     format!("{path}.{key}")
                 };
-                flatten_to(&internal_path, &internal_value, result)?;
+                flatten_to(&internal_path, &internal_value, result).with_context(|| {
+                    format!("Can not merge flat representation of value {internal_value:?} part at path {internal_path:?} into {result:?}")
+                })?;
                 array_index += 1;
             }
         }
         _ => {
             // println!("flatten to {}", path);
-            result.push((path.to_string(), (*value).clone().try_into()?));
+            result.push((
+                path.to_string(),
+                (*value).clone().try_into().with_context(|| {
+                    format!("Can not convert json value {value:?} into database storable value")
+                })?,
+            ));
         }
     }
     Ok(())
@@ -653,7 +709,9 @@ fn flatten_to(
 
 fn flatten(path: &str, value: &serde_json::Value) -> Result<Vec<(String, Value)>> {
     let mut result: Vec<(String, Value)> = Vec::new();
-    flatten_to(path, value, &mut result)?;
+    flatten_to(path, value, &mut result).with_context(|| {
+        format!("Can not merge flat representation of value {value:?} part at path {path:?} into {result:?}")
+    })?;
     Ok(result)
 }
 
@@ -667,8 +725,10 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         value: serde_json::Value,
         index_batch: &mut IndexBatch,
     ) -> Result<ObjectId> {
-        for (internal_path, internal_value) in flatten(&path, &value)? {
-            index_batch.push(internal_path.clone(), internal_value.clone())?;
+        for (internal_path, internal_value) in flatten(&path, &value)
+            .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
+        {
+            index_batch.push(internal_path.clone(), internal_value.clone()).with_context(|| format!("Can not push path-value pair ({internal_path:?}, {internal_value:?}) into index batch"))?;
             self.index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
@@ -684,8 +744,10 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         value: serde_json::Value,
     ) -> Result<ObjectId> {
         let mut index_batch = IndexBatch::new(object_id.clone());
-        self.update_with_index(object_id.clone(), path, value, &mut index_batch)?;
-        index_batch.flush_insert(self.index_transaction)?;
+        self.update_with_index(object_id.clone(), path.clone(), value.clone(), &mut index_batch).with_context(|| format!("Can not update object with id {object_id:?} with path-value pair ({path:?}, {value:?}) also updating index batch {index_batch:?}"))?;
+        index_batch
+            .flush_insert(self.index_transaction)
+            .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
         Ok(object_id)
     }
 
@@ -700,25 +762,32 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 
     pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &str) -> Result<()> {
         let padded_path_prefix = pad(path_prefix);
+        let from_object_id_and_path = Some(&(object_id.clone(), padded_path_prefix.to_string()));
         let paths_to_remove = self
             .index_transaction
             .database_transaction
             .object_id_and_path_to_value
-            .iter(Some(&(object_id.clone(), padded_path_prefix.to_string())))?
+            .iter(from_object_id_and_path).with_context(|| format!("Can not initiate iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?}"))?
             .take_while(|((current_object_id, current_path), _)| {
                 Ok(*current_object_id == *object_id
                     && current_path.starts_with(&padded_path_prefix))
             })
-            .collect::<Vec<_>>()?;
+            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?} taking while object id is {object_id:?} and path starts with {padded_path_prefix:?}"))?;
         let mut index_batch = IndexBatch::new(object_id.clone());
         for ((_, current_path), current_value) in paths_to_remove.into_iter() {
             self.index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
                 .remove(&(object_id.clone(), current_path.clone()));
-            index_batch.push(current_path, current_value)?;
+            index_batch
+                .push(current_path.clone(), current_value.clone())
+                .with_context(|| {
+                    format!("Can not push path-value pair ({current_path:?}, {current_value:?}) into index batch")
+                })?;
         }
-        index_batch.flush_remove(self.index_transaction)?;
+        index_batch
+            .flush_remove(self.index_transaction)
+            .with_context(|| format!("Can not flush-remove index batch {index_batch:?}"))?;
         Ok(())
     }
 }
