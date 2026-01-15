@@ -94,6 +94,7 @@ fn split_on_unescaped_dots(input: &str) -> Vec<String> {
     if !current.is_empty() {
         result.push(current);
     }
+    println!("split_on_unescaped_dots {} => {:?}", input, result);
     result
 }
 
@@ -373,6 +374,7 @@ macro_rules! define_read_methods {
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
+                    println!("get flattened {:?}", entry);
                     let start_from = if padded_path_prefix.is_empty() {
                         0
                     } else {
@@ -588,19 +590,11 @@ impl IndexBatch {
 }
 
 fn escape_key(unescaped_key: &str) -> String {
-    let mut result = unescaped_key.replace(".", "\\.");
-    if result.chars().last() == Some('\\') {
-        result.push('\\');
-    }
-    result
+    unescaped_key.replace('\\', "\\\\").replace('.', "\\.")
 }
 
 fn unescape_key(escaped_key: &str) -> String {
-    let mut result = escaped_key.replace("\\.", ".");
-    if result.chars().last() == Some('\\') {
-        result.pop();
-    }
-    result
+    escaped_key.replace("\\.", ".").replace("\\\\", "\\")
 }
 
 fn flatten_to(
@@ -645,6 +639,7 @@ fn flatten_to(
             }
         }
         _ => {
+            println!("flatten to {}", path);
             result.push((path.to_string(), (*value).clone().try_into()?));
         }
     }
@@ -849,7 +844,7 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let mut previously_added_objects: BTreeMap<ObjectId, serde_json::Value> =
                     BTreeMap::new();
-                for _ in 0..300 {
+                for _ in 0..400 {
                     let action_id = if previously_added_objects.is_empty() {
                         1
                     } else {
@@ -864,10 +859,13 @@ mod tests {
                                 })
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
-                                assert_eq!(
-                                    transaction.get(&object_id, "")?.unwrap(),
-                                    *object_value
+                                let result = transaction.get(&object_id, "")?.unwrap();
+                                println!("result = {}", serde_json::to_string(&result)?);
+                                println!(
+                                    "object_value = {}",
+                                    serde_json::to_string(&object_value)?
                                 );
+                                assert_eq!(result, *object_value);
                                 for (path, value) in flatten(&"", &object_value)? {
                                     let value_as_json: serde_json::Value = value.into();
                                     let partitioned_path = PartitionedPath::from_path(path.clone());
