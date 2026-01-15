@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use anyhow::{Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -28,14 +29,18 @@ pub struct Object {
 type FlatObject = Vec<(String, serde_json::Value)>;
 
 fn pad(path: &str) -> String {
-    let re = regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap();
-    re.replace_all(&path, |caps: &regex::Captures| {
-        let start = caps[1].to_string();
-        let index = caps[2].to_string();
-        let end = caps[3].to_string();
-        format!("{start}{:0>10}{end}", index)
-    })
-    .to_string()
+    static REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap());
+    REGEX
+        .get()
+        .unwrap()
+        .replace_all(&path, |caps: &regex::Captures| {
+            let start = caps[1].to_string();
+            let index = caps[2].to_string();
+            let end = caps[3].to_string();
+            format!("{start}{:0>10}{end}", index)
+        })
+        .to_string()
 }
 
 fn insert_into_map(
@@ -94,7 +99,7 @@ fn split_on_unescaped_dots(input: &str) -> Vec<String> {
     if !current.is_empty() {
         result.push(current);
     }
-    println!("split_on_unescaped_dots {} => {:?}", input, result);
+    // println!("split_on_unescaped_dots {} => {:?}", input, result);
     result
 }
 
@@ -374,7 +379,7 @@ macro_rules! define_read_methods {
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
-                    println!("get flattened {:?}", entry);
+                    // println!("get flattened {:?}", entry);
                     let start_from = if padded_path_prefix.is_empty() {
                         0
                     } else {
@@ -639,7 +644,7 @@ fn flatten_to(
             }
         }
         _ => {
-            println!("flatten to {}", path);
+            // println!("flatten to {}", path);
             result.push((path.to_string(), (*value).clone().try_into()?));
         }
     }
@@ -860,11 +865,11 @@ mod tests {
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
                                 let result = transaction.get(&object_id, "")?.unwrap();
-                                println!("result = {}", serde_json::to_string(&result)?);
-                                println!(
-                                    "object_value = {}",
-                                    serde_json::to_string(&object_value)?
-                                );
+                                // println!("result = {}", serde_json::to_string(&result)?);
+                                // println!(
+                                //     "object_value = {}",
+                                //     serde_json::to_string(&object_value)?
+                                // );
                                 assert_eq!(result, *object_value);
                                 for (path, value) in flatten(&"", &object_value)? {
                                     let value_as_json: serde_json::Value = value.into();
