@@ -473,45 +473,6 @@ macro_rules! define_read_methods {
             ))
         }
 
-        pub fn last(
-            &self,
-            object_id: &ObjectId,
-            path: &str,
-        ) -> Result<Option<(String, serde_json::Value)>> {
-            let padded_path = pad(path);
-            self.index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(
-                    Bound::Included(&(
-                        object_id.clone(),
-                        if padded_path.is_empty() {
-                            "9".to_string()
-                        } else {
-                            format!("{padded_path}.9")
-                        },
-                    )),
-                    true,
-                )?
-                .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path.starts_with(&padded_path))
-                })
-                .map(|((_, current_path), _)| {
-                    let result_path = current_path[..if padded_path.is_empty() {
-                        padded_path.len() - 1
-                    } else {
-                        padded_path.len()
-                    } + 10]
-                        .to_string();
-                    Ok((
-                        result_path.clone(),
-                        self.get(object_id, &result_path)?.ok_or_else(|| {
-                            anyhow!("Can not get last element of array at path {result_path:?}")
-                        })?,
-                    ))
-                })
-                .next()
-        }
     };
 }
 
@@ -831,6 +792,48 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .with_context(|| format!("Can not flush-remove index batch {index_batch:?}"))?;
         Ok(())
     }
+
+    pub fn last(
+        &self,
+        object_id: &ObjectId,
+        path: &str,
+    ) -> Result<Option<(String, serde_json::Value)>> {
+        let padded_path = pad(path);
+        dbg!(&padded_path);
+        let iter_from = Bound::Included(&(
+            object_id.clone(),
+            if padded_path.is_empty() {
+                "9".to_string()
+            } else {
+                format!("{padded_path}.9")
+            },
+        ));
+        dbg!(&iter_from);
+        self.index_transaction
+            .database_transaction
+            .object_id_and_path_to_value
+            .iter(iter_from, true)?
+            .take_while(|((current_object_id, current_path), _)| {
+                dbg!(current_object_id, current_path);
+                Ok(current_object_id == object_id && current_path.starts_with(&padded_path))
+            })
+            .map(|((_, current_path), _)| {
+                let result_path = current_path[..if padded_path.is_empty() {
+                    padded_path.len() - 1
+                } else {
+                    padded_path.len()
+                } + 10]
+                    .to_string();
+                dbg!(&result_path);
+                Ok((
+                    result_path.clone(),
+                    self.get(object_id, &result_path)?.ok_or_else(|| {
+                        anyhow!("Can not get last element of array at path {result_path:?}")
+                    })?,
+                ))
+            })
+            .next()
+    }
 }
 
 #[cfg(test)]
@@ -982,6 +985,7 @@ mod tests {
                                 // );
                                 assert_eq!(result, *object_value);
                                 for (path, value) in flatten(&"", &object_value)? {
+                                    println!("{path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.into();
                                     let partitioned_path = PartitionedPath::from_path(path.clone());
                                     let index_record_type = if partitioned_path.index.is_some() {
@@ -990,7 +994,7 @@ mod tests {
                                         IndexRecordType::Direct
                                     };
                                     let select_path = if partitioned_path.index.is_some() {
-                                        partitioned_path.base
+                                        partitioned_path.base.clone()
                                     } else {
                                         path.clone()
                                     };
@@ -1025,6 +1029,15 @@ mod tests {
                                     assert!(selected.iter().any(|selected_object_id| {
                                         selected_object_id == object_id
                                     }));
+                                    if partitioned_path.index.is_some() {
+                                        assert_eq!(
+                                            transaction
+                                                .last(object_id, &partitioned_path.base)?
+                                                .unwrap()
+                                                .1,
+                                            value_as_json
+                                        );
+                                    }
                                 }
                             }
                             previously_added_objects.extend(new_objects);
