@@ -472,6 +472,46 @@ macro_rules! define_read_methods {
                     }),
             ))
         }
+
+        pub fn last(
+            &self,
+            object_id: &ObjectId,
+            path: &str,
+        ) -> Result<Option<(String, serde_json::Value)>> {
+            let padded_path = pad(path);
+            self.index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(
+                    Bound::Included(&(
+                        object_id.clone(),
+                        if padded_path.is_empty() {
+                            "9".to_string()
+                        } else {
+                            format!("{padded_path}.9")
+                        },
+                    )),
+                    true,
+                )?
+                .take_while(|((current_object_id, current_path), _)| {
+                    Ok(current_object_id == object_id && current_path.starts_with(&padded_path))
+                })
+                .map(|((_, current_path), _)| {
+                    let result_path = current_path[..if padded_path.is_empty() {
+                        padded_path.len() - 1
+                    } else {
+                        padded_path.len()
+                    } + 10]
+                        .to_string();
+                    Ok((
+                        result_path.clone(),
+                        self.get(object_id, &result_path)?.ok_or_else(|| {
+                            anyhow!("Can not get last element of array at path {result_path:?}")
+                        })?,
+                    ))
+                })
+                .next()
+        }
     };
 }
 
