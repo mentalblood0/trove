@@ -152,9 +152,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.52"
+version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4932aefd12402b36c60956a4fe0035421f544799057659ff86f923657aada3"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -293,7 +293,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#ad43667398ebac3dc5f735c2c5f954a441dcf28c"
+source = "git+https://github.com/mentalblood0/dream#2a4951f679954b619c7ba850dfac3f269b28d979"
 dependencies = [
  "anyhow",
  "bincode",
@@ -352,9 +352,9 @@ checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "getrandom"
@@ -438,7 +438,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#82db6ac3cccb028a226543714a5ee102448a4d49"
+source = "git+https://github.com/mentalblood0/lawn#4d037930661ca48ab2f1f10ffe81f3276d9fd392"
 dependencies = [
  "anyhow",
  "bincode",
@@ -674,9 +674,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
+checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
 
 [[package]]
 name = "rustversion"
@@ -695,11 +695,11 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser-bw"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6a365a41ec5ea883ec8007616006fee1d5dbb1f882b5c44021ade356569bcd"
+version = "0.0.604"
+source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#5eccc0819dace4b056beb3b5096701e3df810d19"
 dependencies = [
  "arraydeque",
+ "smallvec 2.0.0-alpha.12",
  "thiserror",
 ]
 
@@ -721,8 +721,8 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.14"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#ec2441a7e50f3a1aca063d3eaf8548ad86501748"
+version = "0.0.16"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#40e34348a16060335c77fa3e807fad077ce009ce"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -803,18 +803,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -935,9 +935,9 @@ dependencies = [
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -1045,9 +1045,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "xxhash-rust"
@@ -1083,6 +1083,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"

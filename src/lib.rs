@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Bound;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Error, Result, anyhow};
@@ -360,7 +361,7 @@ macro_rules! define_read_methods {
                     .index_transaction
                     .database_transaction
                     .object_id_and_path_to_value
-                    .iter(None)
+                    .iter(Bound::Unbounded, false)
                     .with_context(
                         || "Can not initiate iteration over object_id_and_path_to_value table",
                     )?,
@@ -377,12 +378,12 @@ macro_rules! define_read_methods {
             let padded_path_prefix_with_dot = padded_path_prefix.clone() + ".";
             let mut flat_object: FlatObject = Vec::new();
             let from_object_id_and_path =
-                Some(&(object_id.clone(), padded_path_prefix.to_string()));
+                &(object_id.clone(), padded_path_prefix.to_string());
             let mut iterator = self
                 .index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
-                .iter(from_object_id_and_path)
+                .iter(Bound::Included(from_object_id_and_path), false)
                 .with_context(
                     || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
                 )?
@@ -762,12 +763,12 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 
     pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &str) -> Result<()> {
         let padded_path_prefix = pad(path_prefix);
-        let from_object_id_and_path = Some(&(object_id.clone(), padded_path_prefix.to_string()));
+        let from_object_id_and_path = &(object_id.clone(), padded_path_prefix.to_string());
         let paths_to_remove = self
             .index_transaction
             .database_transaction
             .object_id_and_path_to_value
-            .iter(from_object_id_and_path).with_context(|| format!("Can not initiate iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?}"))?
+            .iter(Bound::Included(from_object_id_and_path), false).with_context(|| format!("Can not initiate iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?}"))?
             .take_while(|((current_object_id, current_path), _)| {
                 Ok(*current_object_id == *object_id
                     && current_path.starts_with(&padded_path_prefix))
