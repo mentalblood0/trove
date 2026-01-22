@@ -27,133 +27,51 @@ pub struct Object {
     pub value: serde_json::Value,
 }
 
-type FlatObject = Vec<(String, serde_json::Value)>;
-
-fn pad(path: &str) -> String {
-    static REGEX: OnceLock<regex::Regex> = OnceLock::new();
-    REGEX
-        .get_or_init(|| regex::Regex::new(r"([^\\]\.|^)(\d{1,9})(\.|$)").unwrap())
-        .replace_all(&path, |caps: &regex::Captures| {
-            let start = caps[1].to_string();
-            let index = caps[2].to_string();
-            let end = caps[3].to_string();
-            format!("{start}{:0>10}{end}", index)
-        })
-        .to_string()
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
+pub enum PathSegment {
+    JsonObjectKey(String),
+    JsonArrayIndex(u32),
 }
 
-fn insert_into_map(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    parts: Vec<String>,
-    value: serde_json::Value,
-) {
-    match parts.len() {
-        0 => {
-            map.insert("".to_string(), value);
-        }
-        1 => {
-            map.insert(parts[0].to_string(), value);
-        }
-        _ => {
-            let first = parts[0].to_string();
-            let rest = parts[1..].to_vec();
-            if !map.contains_key(&first) {
-                map.insert(
-                    first.clone(),
-                    serde_json::Value::Object(serde_json::Map::new()),
-                );
-            }
-            if let Some(serde_json::Value::Object(nested_map)) = map.get_mut(&first) {
-                insert_into_map(nested_map, rest, value);
-            }
-        }
-    }
-}
+type Path = Vec<PathSegment>;
 
-fn split_on_unescaped_dots(input: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut escaped = false;
+type FlatObject = Vec<(Path, Value)>;
 
-    for ch in input.chars() {
-        if escaped {
-            if ch != '.' {
-                current.push('\\');
-            }
-            current.push(ch);
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '.' {
-            if !current.is_empty() {
-                result.push(std::mem::take(&mut current));
-            }
-        } else {
-            current.push(ch);
-        }
-    }
-    if escaped {
-        current.push('\\');
-    }
-    if !current.is_empty() {
-        result.push(current);
-    }
-    // println!("split_on_unescaped_dots {} => {:?}", input, result);
-    result
-}
-
-fn nest(flat_object: FlatObject) -> Option<serde_json::Value> {
+pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     if flat_object.is_empty() {
-        None
-    } else if flat_object.len() == 1 && flat_object[0].0 == "" {
-        Some(flat_object[0].clone().1)
+        Ok(None)
+    } else if flat_object[0].0.is_empty() {
+        Ok(Some(flat_object[0].1.clone().into()))
     } else {
-        let mut map = serde_json::Map::new();
+        let mut result_option: Option<serde_json::Value> = None;
         for (path, value) in flat_object {
-            let parts = split_on_unescaped_dots(&path);
-            insert_into_map(
-                &mut map,
-                parts
-                    .iter()
-                    .map(|escaped_key| unescape_key(escaped_key))
-                    .collect::<Vec<_>>(),
-                value,
-            );
-        }
-        let nested = serde_json::Value::Object(map);
-        Some(process_arrays(nested))
-    }
-}
-
-fn process_arrays(nested_object: serde_json::Value) -> serde_json::Value {
-    match nested_object {
-        serde_json::Value::Object(map) => {
-            if let Ok(mut pairs) =
-                fallible_iterator::convert(map.iter().map(|keyvalue| Ok::<_, Error>(keyvalue)))
-                    .map(|(key, value)| Ok((key.parse::<u32>()?, value.clone())))
-                    .collect::<Vec<_>>()
-            {
-                pairs.sort_by_key(|(key, _)| key.clone());
-                serde_json::Value::Array(
-                    pairs
-                        .into_iter()
-                        .map(|(_, value)| process_arrays(value))
-                        .collect::<Vec<_>>(),
-                )
-            } else {
-                serde_json::Value::Object(
-                    map.into_iter()
-                        .map(|(key, value)| (key, process_arrays(value)))
-                        .collect::<serde_json::Map<_, _>>(),
-                )
+            let mut current_option = result_option;
+            for path_segment in path {
+                match path_segment {
+                    PathSegment::JsonObjectKey(json_object_key) => {
+                        if current_option.is_none() {
+                            current_option = Some(serde_json::json!({}));
+                        }
+                        current_option
+                            .unwrap()
+                            .as_object()
+                            .unwrap()
+                            .insert(json_object_key.clone(), value.into().clone());
+                    }
+                    PathSegment::JsonArrayIndex(_) => {
+                        if current_option.is_none() {
+                            current_option = Some(serde_json::json!([]));
+                        }
+                        current_option
+                            .unwrap()
+                            .as_array()
+                            .unwrap()
+                            .push(value.into().clone());
+                    }
+                }
             }
         }
-        serde_json::Value::Array(vec) => serde_json::Value::Array(
-            vec.into_iter()
-                .map(|value| process_arrays(value))
-                .collect::<Vec<_>>(),
-        ),
-        _ => nested_object,
+        Ok(result_option)
     }
 }
 
@@ -202,9 +120,10 @@ impl From<Value> for serde_json::Value {
 }
 
 dream::define_index!(trove_database {
-    object_id_and_path_to_value<(ObjectId, String), super::super::Value>,
+    object_id_and_path_to_value<(ObjectId, Path), super::super::Value>,
 } use {
     use crate::ObjectId;
+    use crate::Path;
 });
 
 pub struct Chest {
@@ -275,67 +194,39 @@ impl Digest {
         }
     }
 
-    fn of_pathvalue(index_record_type: IndexRecordType, path: &str, value: &Value) -> Result<Self> {
+    fn of_pathvalue(
+        index_record_type: IndexRecordType,
+        path: &Path,
+        value: &Value,
+    ) -> Result<Self> {
+        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
         let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
             .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> = Vec::with_capacity(2 + path.len() + 1 + encoded_value.len());
+        let mut data: Vec<u8> =
+            Vec::with_capacity(2 + encoded_path.len() + 1 + encoded_value.len());
         data.push(index_record_type as u8);
-        data.push(0);
-        data.extend_from_slice(path.as_bytes());
+        data.push(0u8);
+        data.extend_from_slice(&encoded_path);
         data.push(0u8);
         data.extend_from_slice(&encoded_value);
         Ok(Self::of_data(&data))
     }
 
     fn of_path_object_id_and_value(
-        path: &str,
+        path: &Path,
         object_id: &ObjectId,
         value: &Value,
     ) -> Result<Self> {
+        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
         let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
             .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> = Vec::with_capacity(path.len() + 1 + 16 + encoded_value.len());
-        data.extend_from_slice(path.as_bytes());
+        let mut data: Vec<u8> =
+            Vec::with_capacity(encoded_path.len() + 1 + 16 + encoded_value.len());
+        data.extend_from_slice(&encoded_path);
         data.push(0u8);
         data.extend_from_slice(&object_id.value);
         data.extend_from_slice(&encoded_value);
         Ok(Self::of_data(&data))
-    }
-}
-
-#[derive(Debug)]
-struct PartitionedPath {
-    base: String,
-    index: Option<u32>,
-}
-
-impl PartitionedPath {
-    fn from_path(path: String) -> Self {
-        let result = if let Ok(index) = path.parse::<u32>() {
-            Self {
-                base: "".to_string(),
-                index: Some(index),
-            }
-        } else if let Some(dot_position) = path.rfind('.') {
-            let (base, index_string) = path.split_at(dot_position);
-            if let Ok(index) = index_string[1..].parse::<u32>() {
-                Self {
-                    base: base.to_string(),
-                    index: Some(index),
-                }
-            } else {
-                Self {
-                    base: path.clone(),
-                    index: None,
-                }
-            }
-        } else {
-            Self {
-                base: path.clone(),
-                index: None,
-            }
-        };
-        result
     }
 }
 
@@ -349,8 +240,8 @@ pub struct WriteTransaction<'a, 'b, 'c> {
 
 pub struct ObjectsIterator<'a> {
     data_table_iterator:
-        Box<dyn FallibleIterator<Item = ((ObjectId, String), Value), Error = Error> + 'a>,
-    last_entry: Option<((ObjectId, String), Value)>,
+        Box<dyn FallibleIterator<Item = ((ObjectId, Path), Value), Error = Error> + 'a>,
+    last_entry: Option<((ObjectId, Path), Value)>,
 }
 
 macro_rules! define_read_methods {
@@ -372,13 +263,11 @@ macro_rules! define_read_methods {
         pub fn get_flattened(
             &'a self,
             object_id: &ObjectId,
-            path_prefix: &str,
+            path_prefix: &Path,
         ) -> Result<FlatObject> {
-            let padded_path_prefix = pad(path_prefix);
-            let padded_path_prefix_with_dot = padded_path_prefix.clone() + ".";
             let mut flat_object: FlatObject = Vec::new();
             let from_object_id_and_path =
-                &(object_id.clone(), padded_path_prefix.to_string());
+                &(object_id.clone(), path_prefix.clone());
             let mut iterator = self
                 .index_transaction
                 .database_transaction
@@ -389,20 +278,14 @@ macro_rules! define_read_methods {
                 )?
                 .take_while(|entry| {
                     Ok(entry.0.0 == *object_id
-                        && (padded_path_prefix == ""
-                            || entry.0.1 == padded_path_prefix
-                            || entry.0.1.starts_with(&padded_path_prefix_with_dot)))
+                        && (path_prefix.is_empty()
+                            || entry.0.1 == *path_prefix
+                            || entry.0.1.starts_with(&path_prefix)))
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
-                    // println!("get flattened {:?}", entry);
-                    let start_from = if padded_path_prefix.is_empty() {
-                        0
-                    } else {
-                        entry.0.1.len().min(padded_path_prefix.len() + 1)
-                    };
                     flat_object.push((
-                        entry.0.1.clone()[start_from..].to_string(),
+                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
                         serde_json::Value::from(entry.1.clone()),
                     ));
                 } else {
@@ -415,9 +298,9 @@ macro_rules! define_read_methods {
         pub fn get(
             &'a self,
             object_id: &ObjectId,
-            path_prefix: &str,
+            path_prefix: &Path,
         ) -> Result<Option<serde_json::Value>> {
-            Ok(nest(self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?))
+            let flattened = self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?;
         }
 
         pub fn select(
