@@ -814,14 +814,14 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .object_id_and_path_to_value
             .iter(iter_from, true)?
             .take_while(|((current_object_id, current_path), _)| {
-                dbg!(current_object_id, current_path);
+                dbg!(&current_path);
                 Ok(current_object_id == object_id && current_path.starts_with(&padded_path))
             })
             .map(|((_, current_path), _)| {
                 let result_path = current_path[..if padded_path.is_empty() {
-                    padded_path.len() - 1
+                    0
                 } else {
-                    padded_path.len()
+                    padded_path.len() + 1
                 } + 10]
                     .to_string();
                 dbg!(&result_path);
@@ -984,9 +984,12 @@ mod tests {
                                 //     serde_json::to_string(&object_value)?
                                 // );
                                 assert_eq!(result, *object_value);
-                                for (path, value) in flatten(&"", &object_value)? {
+                                let flatten_object = flatten(&"", &object_value)?;
+                                for (pathvalue_index, (path, value)) in
+                                    flatten_object.iter().enumerate()
+                                {
                                     println!("{path:?} = {value:?}");
-                                    let value_as_json: serde_json::Value = value.into();
+                                    let value_as_json: serde_json::Value = value.clone().into();
                                     let partitioned_path = PartitionedPath::from_path(path.clone());
                                     let index_record_type = if partitioned_path.index.is_some() {
                                         IndexRecordType::Array
@@ -1030,13 +1033,21 @@ mod tests {
                                         selected_object_id == object_id
                                     }));
                                     if partitioned_path.index.is_some() {
-                                        assert_eq!(
-                                            transaction
-                                                .last(object_id, &partitioned_path.base)?
-                                                .unwrap()
-                                                .1,
-                                            value_as_json
-                                        );
+                                        if flatten_object
+                                            .get(pathvalue_index + 1)
+                                            .and_then(|(next_path, next_value)| {
+                                                PartitionedPath::from_path(next_path.clone()).index
+                                            })
+                                            .is_none()
+                                        {
+                                            assert_eq!(
+                                                transaction
+                                                    .last(object_id, &partitioned_path.base)?
+                                                    .unwrap()
+                                                    .1,
+                                                value_as_json
+                                            );
+                                        }
                                     }
                                 }
                             }

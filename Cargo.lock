@@ -438,7 +438,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#c82f91491212b1cb3b0ede5dc21e119a5041993e"
+source = "git+https://github.com/mentalblood0/lawn#2aecb856f27f57b402e1dce16932ba7af5de6d98"
 dependencies = [
  "anyhow",
  "bincode",
@@ -695,8 +695,9 @@ dependencies = [
 
 [[package]]
 name = "saphyr-parser-bw"
-version = "0.0.604"
-source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#5eccc0819dace4b056beb3b5096701e3df810d19"
+version = "0.0.605"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e1aee7486406df3541b5a657204a11be97175a467d77bc98e6d94a66289fb80"
 dependencies = [
  "arraydeque",
  "smallvec 2.0.0-alpha.12",
@@ -722,7 +723,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.16"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#40e34348a16060335c77fa3e807fad077ce009ce"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#39b71381606c460a2e4d880bea9ea26547b45826"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -1083,6 +1084,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.15"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
+checksum = "dfcd145825aace48cff44a8844de64bf75feec3080e0aa5cdbde72961ae51a65"
