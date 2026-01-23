@@ -43,35 +43,39 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     } else if flat_object[0].0.is_empty() {
         Ok(Some(flat_object[0].1.clone().into()))
     } else {
-        let mut result_option: Option<serde_json::Value> = None;
+        let mut result = serde_json::Value::Null;
         for (path, value) in flat_object {
-            let mut current_option = result_option;
+            let mut current = &mut result;
             for path_segment in path {
                 match path_segment {
                     PathSegment::JsonObjectKey(json_object_key) => {
-                        if current_option.is_none() {
-                            current_option = Some(serde_json::json!({}));
+                        if *current == serde_json::Value::Null {
+                            *current = serde_json::json!({});
                         }
-                        current_option
-                            .unwrap()
-                            .as_object()
-                            .unwrap()
-                            .insert(json_object_key.clone(), value.into().clone());
+                        let current_object = current
+                            .as_object_mut()
+                            .ok_or_else(|| anyhow!("Can not put value {value:?} at path {path:?} because can not put into array by object key"))?;
+                        current_object.insert(json_object_key.clone(), value.clone().into());
+                        current = current_object.get_mut(json_object_key).ok_or_else(|| {
+                            anyhow!("Can not find value which just put at key {json_object_key:?}")
+                        })?;
                     }
                     PathSegment::JsonArrayIndex(_) => {
-                        if current_option.is_none() {
-                            current_option = Some(serde_json::json!([]));
+                        if *current == serde_json::Value::Null {
+                            *current = serde_json::json!([]);
                         }
-                        current_option
-                            .unwrap()
-                            .as_array()
-                            .unwrap()
-                            .push(value.into().clone());
+                        let current_array =current 
+                            .as_array_mut()
+                            .ok_or_else(|| anyhow!("Can not put value {value:?} at path {path:?} because can not put into array by object key"))?;
+                        current_array.push(value.clone().into());
+                        current = current_array.last_mut().ok_or_else(|| {
+                            anyhow!("Can not find value which just pushed")
+                        })?;
                     }
                 }
             }
         }
-        Ok(result_option)
+        Ok(Some(result))
     }
 }
 
