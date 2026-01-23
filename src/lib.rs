@@ -290,7 +290,7 @@ macro_rules! define_read_methods {
                 if let Some(entry) = iterator.next()? {
                     flat_object.push((
                         entry.0.1.clone()[path_prefix.len()..].to_vec(),
-                        serde_json::Value::from(entry.1.clone()),
+                        entry.1,
                     ));
                 } else {
                     break;
@@ -304,7 +304,7 @@ macro_rules! define_read_methods {
             object_id: &ObjectId,
             path_prefix: &Path,
         ) -> Result<Option<serde_json::Value>> {
-            let flattened = self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?;
+            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
         }
 
         pub fn select(
