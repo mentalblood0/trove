@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
-use std::sync::OnceLock;
 
 use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -80,7 +79,7 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
 }
 
 #[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
-enum Value {
+pub enum Value {
     Null,
     Integer(i64),
     Float(f64),
@@ -250,115 +249,6 @@ pub struct ObjectsIterator<'a> {
 
 macro_rules! define_read_methods {
     () => {
-        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
-            Ok(ObjectsIterator {
-                data_table_iterator: self
-                    .index_transaction
-                    .database_transaction
-                    .object_id_and_path_to_value
-                    .iter(Bound::Unbounded, false)
-                    .with_context(
-                        || "Can not initiate iteration over object_id_and_path_to_value table",
-                    )?,
-                last_entry: None,
-            })
-        }
-
-        pub fn get_flattened(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<FlatObject> {
-            let mut flat_object: FlatObject = Vec::new();
-            let from_object_id_and_path =
-                &(object_id.clone(), path_prefix.clone());
-            let mut iterator = self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(from_object_id_and_path), false)
-                .with_context(
-                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
-                )?
-                .take_while(|entry| {
-                    Ok(entry.0.0 == *object_id
-                        && (path_prefix.is_empty()
-                            || entry.0.1 == *path_prefix
-                            || entry.0.1.starts_with(&path_prefix)))
-                });
-            loop {
-                if let Some(entry) = iterator.next()? {
-                    flat_object.push((
-                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
-                        entry.1,
-                    ));
-                } else {
-                    break;
-                }
-            }
-            Ok(flat_object)
-        }
-
-        pub fn get(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<Option<serde_json::Value>> {
-            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
-        }
-
-        pub fn select(
-            &'a self,
-            presention_conditions: &Vec<(IndexRecordType, String, serde_json::Value)>,
-            absention_conditions: &Vec<(IndexRecordType, String, serde_json::Value)>,
-            start_after_object: Option<ObjectId>,
-        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            let present_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in presention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
-                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
-                        .value,
-                    }));
-                }
-                result
-            };
-            let absent_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in absention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
-                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
-                        .value,
-                    }));
-                }
-                result
-            };
-            Ok(Box::new(
-                self.index_transaction
-                    .search(
-                        &present_ids,
-                        &absent_ids,
-                        start_after_object.and_then(|start_after_object| {
-                            Some(dream::Id {
-                                value: start_after_object.value,
-                            })
-                        }),
-                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
-                    .map(|dream_id| {
-                        Ok(ObjectId {
-                            value: dream_id.value,
-                        })
-                    }),
-            ))
-        }
 
     };
 }
@@ -383,7 +273,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
             let mut flat_object: FlatObject = Vec::new();
             flat_object.push((
                 first_object_entry.0.1,
-                serde_json::Value::from(first_object_entry.1),
+                first_object_entry.1,
             ));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
@@ -398,13 +288,13 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     }
                     flat_object.push((
                         current_entry.0.1.clone(),
-                        serde_json::Value::from(current_entry.1.clone()),
+                        current_entry.1.clone(),
                     ));
                 } else {
                     break;
                 }
             }
-            Ok(nest(flat_object).and_then(|value| {
+            Ok(nest(&flat_object)?.and_then(|value| {
                 Some(Object {
                     id: object_id,
                     value,
@@ -432,35 +322,36 @@ impl IndexBatch {
         }
     }
 
-    fn push(&mut self, path: String, value: Value) -> Result<&Self> {
-        let partitioned_path = PartitionedPath::from_path(path.clone());
-        if let Some(path_index) = partitioned_path.index {
+    fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
+        let path_base = path[..path.len()].to_vec();
+        let path_index_option = path.last().and_then(|last_segment| {
+            if let PathSegment::JsonArrayIndex(path_index) = last_segment {Some(path_index)} else {None}});
+        if let Some(path_index) = path_index_option{
             self.digests.push(dream::Object::Identified(dream::Id {
                 value: Digest::of_pathvalue(
                     IndexRecordType::Array,
-                    &partitioned_path.base,
+&path_base,
                     &value.clone(),
                 )
                 .with_context(|| {
                     format!(
-                        "Can not compute array type digest for path {:?} and value {:?}",
-                        partitioned_path.base, value
+                        "Can not compute array type digest for path {path_base:?} and value {value:?}",
                     )
                 })?
                 .value,
             }));
             self.array_digests
-                .entry(path_index)
+                .entry(*path_index)
                 .or_insert(Vec::new())
                 .push(dream::Object::Identified(dream::Id {
                     value: Digest::of_path_object_id_and_value(
-                        &partitioned_path.base,
+                        &path_base,
                         &self.object_id,
                         &value,
                 ).with_context(|| {
                     format!(
-                        "Can not compute array type digest for path {:?}, object id {:?} and value {:?}",
-                        partitioned_path.base, self.object_id, value
+                        "Can not compute array type digest for path {path_base:?}, object id {:?} and value {value:?}",
+                        self.object_id
                     )
                 })?
                     .value,
@@ -530,30 +421,17 @@ impl IndexBatch {
     }
 }
 
-fn escape_key(unescaped_key: &str) -> String {
-    unescaped_key.replace('\\', "\\\\").replace('.', "\\.")
-}
-
-fn unescape_key(escaped_key: &str) -> String {
-    escaped_key.replace("\\.", ".").replace("\\\\", "\\")
-}
-
 fn flatten_to(
-    path: &str,
+    path: Path,
     value: &serde_json::Value,
-    result: &mut Vec<(String, Value)>,
+    result: &mut Vec<(Path, Value)>,
 ) -> Result<()> {
     match value {
         serde_json::Value::Object(map) => {
             for (key, internal_value) in map {
-                let escaped_key = escape_key(&key);
-                let internal_path = if path.is_empty() {
-                    escaped_key
-                } else {
-                    format!("{path}.{escaped_key}")
-                };
-                flatten_to(&internal_path, &internal_value, result).with_context(|| {
-                    format!("Can not get flat representation of value {internal_value:?} part at path {internal_path:?}")
+                    let internal_path = path.iter().cloned().chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter()).collect::<Path>();
+                flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    format!("Can not get flat representation of value {internal_value:?} part")
                 })?;
             }
         }
@@ -572,21 +450,16 @@ fn flatten_to(
                     }
                 }
                 let key = format!("{:0>10}", array_index);
-                let internal_path = if path.is_empty() {
-                    key
-                } else {
-                    format!("{path}.{key}")
-                };
-                flatten_to(&internal_path, &internal_value, result).with_context(|| {
-                    format!("Can not merge flat representation of value {internal_value:?} part at path {internal_path:?} into {result:?}")
+                    let internal_path = path.iter().cloned().chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter()).collect::<Path>();
+                flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    format!("Can not merge flat representation of value {internal_value:?} part into {result:?}")
                 })?;
                 array_index += 1;
             }
         }
         _ => {
-            // println!("flatten to {}", path);
             result.push((
-                path.to_string(),
+                path,
                 (*value).clone().try_into().with_context(|| {
                     format!("Can not convert json value {value:?} into database storable value")
                 })?,
@@ -596,9 +469,9 @@ fn flatten_to(
     Ok(())
 }
 
-fn flatten(path: &str, value: &serde_json::Value) -> Result<Vec<(String, Value)>> {
-    let mut result: Vec<(String, Value)> = Vec::new();
-    flatten_to(path, value, &mut result).with_context(|| {
+fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>> {
+    let mut result: Vec<(Path, Value)> = Vec::new();
+    flatten_to(path.clone(), value, &mut result).with_context(|| {
         format!("Can not merge flat representation of value {value:?} part at path {path:?} into {result:?}")
     })?;
     Ok(result)
@@ -606,11 +479,120 @@ fn flatten(path: &str, value: &serde_json::Value) -> Result<Vec<(String, Value)>
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
+        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
+            Ok(ObjectsIterator {
+                data_table_iterator: self
+                    .index_transaction
+                    .database_transaction
+                    .object_id_and_path_to_value
+                    .iter(Bound::Unbounded, false)
+                    .with_context(
+                        || "Can not initiate iteration over object_id_and_path_to_value table",
+                    )?,
+                last_entry: None,
+            })
+        }
+
+        pub fn get_flattened(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &Path,
+        ) -> Result<FlatObject> {
+            let mut flat_object: FlatObject = Vec::new();
+            let from_object_id_and_path =
+                &(object_id.clone(), path_prefix.clone());
+            let mut iterator = self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(Bound::Included(from_object_id_and_path), false)
+                .with_context(
+                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
+                )?
+                .take_while(|entry| {
+                    Ok(entry.0.0 == *object_id
+                        && (path_prefix.is_empty()
+                            || entry.0.1 == *path_prefix
+                            || entry.0.1.starts_with(&path_prefix)))
+                });
+            loop {
+                if let Some(entry) = iterator.next()? {
+                    flat_object.push((
+                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
+                        entry.1,
+                    ));
+                } else {
+                    break;
+                }
+            }
+            Ok(flat_object)
+        }
+
+        pub fn get(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &Path,
+        ) -> Result<Option<serde_json::Value>> {
+            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
+        }
+
+        pub fn select(
+            &'a self,
+            presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+            absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+            start_after_object: Option<ObjectId>,
+        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+            let present_ids = {
+                let mut result = Vec::new();
+                for (index_record_type, path, value) in presention_conditions {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_pathvalue(
+                            index_record_type.clone(),
+                            &path,
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
+                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                        .value,
+                    }));
+                }
+                result
+            };
+            let absent_ids = {
+                let mut result = Vec::new();
+                for (index_record_type, path, value) in absention_conditions {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_pathvalue(
+                            index_record_type.clone(),
+                            &path,
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
+                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                        .value,
+                    }));
+                }
+                result
+            };
+            Ok(Box::new(
+                self.index_transaction
+                    .search(
+                        &present_ids,
+                        &absent_ids,
+                        start_after_object.and_then(|start_after_object| {
+                            Some(dream::Id {
+                                value: start_after_object.value,
+                            })
+                        }),
+                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
+                    .map(|dream_id| {
+                        Ok(ObjectId {
+                            value: dream_id.value,
+                        })
+                    }),
+            ))
+        }
 
     fn update_with_index(
         &mut self,
         object_id: ObjectId,
-        path: String,
+        path: Path,
         value: serde_json::Value,
         index_batch: &mut IndexBatch,
     ) -> Result<ObjectId> {
@@ -629,7 +611,7 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     pub fn update(
         &mut self,
         object_id: ObjectId,
-        path: String,
+        path: Path,
         value: serde_json::Value,
     ) -> Result<ObjectId> {
         let mut index_batch = IndexBatch::new(object_id.clone());
@@ -642,16 +624,15 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
 
     pub fn insert(&mut self, value: serde_json::Value) -> Result<ObjectId> {
         let id = ObjectId::new();
-        self.update(id.clone(), "".to_string(), value)
+        self.update(id.clone(), vec![], value)
     }
 
     pub fn insert_with_id(&mut self, object: Object) -> Result<ObjectId> {
-        self.update(object.id, "".to_string(), object.value)
+        self.update(object.id, vec![], object.value)
     }
 
-    pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &str) -> Result<()> {
-        let padded_path_prefix = pad(path_prefix);
-        let from_object_id_and_path = &(object_id.clone(), padded_path_prefix.to_string());
+    pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &Path) -> Result<()> {
+        let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
         let paths_to_remove = self
             .index_transaction
             .database_transaction
@@ -659,9 +640,9 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .iter(Bound::Included(from_object_id_and_path), false).with_context(|| format!("Can not initiate iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?}"))?
             .take_while(|((current_object_id, current_path), _)| {
                 Ok(*current_object_id == *object_id
-                    && current_path.starts_with(&padded_path_prefix))
+                    && current_path.starts_with(&path_prefix))
             })
-            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?} taking while object id is {object_id:?} and path starts with {padded_path_prefix:?}"))?;
+            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?} taking while object id is {object_id:?} and path starts with {path_prefix:?}"))?;
         let mut index_batch = IndexBatch::new(object_id.clone());
         for ((_, current_path), current_value) in paths_to_remove.into_iter() {
             self.index_transaction
@@ -683,17 +664,11 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     pub fn last(
         &self,
         object_id: &ObjectId,
-        path: &str,
-    ) -> Result<Option<(String, serde_json::Value)>> {
-        let padded_path = pad(path);
-        dbg!(&padded_path);
+        array_path: &Path,
+    ) -> Result<Option<(u32, serde_json::Value)>> {
         let iter_from = Bound::Included(&(
             object_id.clone(),
-            if padded_path.is_empty() {
-                "9".to_string()
-            } else {
-                format!("{padded_path}.9")
-            },
+            array_path.iter().cloned().chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)]).collect::<Path>()
         ));
         dbg!(&iter_from);
         self.index_transaction
@@ -702,18 +677,14 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .iter(iter_from, true)?
             .take_while(|((current_object_id, current_path), _)| {
                 dbg!(&current_path);
-                Ok(current_object_id == object_id && current_path.starts_with(&padded_path))
+                Ok(current_object_id == object_id && current_path.len() == array_path.len() + 1 && current_path.starts_with(&array_path))
             })
-            .map(|((_, current_path), _)| {
-                let result_path = current_path[..if padded_path.is_empty() {
-                    0
-                } else {
-                    padded_path.len() + 1
-                } + 10]
-                    .to_string();
-                dbg!(&result_path);
+            .map(|((_, result_path), _)| {
                 Ok((
-                    result_path.clone(),
+                    match result_path.last().ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
+                        PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
+                        PathSegment::JsonArrayIndex(array_index) => *array_index
+                    },
                     self.get(object_id, &result_path)?.ok_or_else(|| {
                         anyhow!("Can not get last element of array at path {result_path:?}")
                     })?,
@@ -864,14 +835,14 @@ mod tests {
                                 })
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
-                                let result = transaction.get(&object_id, "")?.unwrap();
+                                let result = transaction.get(&object_id, &vec![])?.unwrap();
                                 // println!("result = {}", serde_json::to_string(&result)?);
                                 // println!(
                                 //     "object_value = {}",
                                 //     serde_json::to_string(&object_value)?
                                 // );
                                 assert_eq!(result, *object_value);
-                                let flatten_object = flatten(&"", &object_value)?;
+                                let flatten_object = flatten(&vec![], &object_value)?;
                                 for (pathvalue_index, (path, value)) in
                                     flatten_object.iter().enumerate()
                                 {
