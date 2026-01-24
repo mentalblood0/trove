@@ -249,7 +249,115 @@ pub struct ObjectsIterator<'a> {
 
 macro_rules! define_read_methods {
     () => {
+        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
+            Ok(ObjectsIterator {
+                data_table_iterator: self
+                    .index_transaction
+                    .database_transaction
+                    .object_id_and_path_to_value
+                    .iter(Bound::Unbounded, false)
+                    .with_context(
+                        || "Can not initiate iteration over object_id_and_path_to_value table",
+                    )?,
+                last_entry: None,
+            })
+        }
 
+        pub fn get_flattened(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &Path,
+        ) -> Result<FlatObject> {
+            let mut flat_object: FlatObject = Vec::new();
+            let from_object_id_and_path =
+                &(object_id.clone(), path_prefix.clone());
+            let mut iterator = self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(Bound::Included(from_object_id_and_path), false)
+                .with_context(
+                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
+                )?
+                .take_while(|entry| {
+                    Ok(entry.0.0 == *object_id
+                        && (path_prefix.is_empty()
+                            || entry.0.1 == *path_prefix
+                            || entry.0.1.starts_with(&path_prefix)))
+                });
+            loop {
+                if let Some(entry) = iterator.next()? {
+                    flat_object.push((
+                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
+                        entry.1,
+                    ));
+                } else {
+                    break;
+                }
+            }
+            Ok(flat_object)
+        }
+
+        pub fn get(
+            &'a self,
+            object_id: &ObjectId,
+            path_prefix: &Path,
+        ) -> Result<Option<serde_json::Value>> {
+            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
+        }
+
+        pub fn select(
+            &'a self,
+            presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+            absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+            start_after_object: Option<ObjectId>,
+        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+            let present_ids = {
+                let mut result = Vec::new();
+                for (index_record_type, path, value) in presention_conditions {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_pathvalue(
+                            index_record_type.clone(),
+                            &path,
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
+                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                        .value,
+                    }));
+                }
+                result
+            };
+            let absent_ids = {
+                let mut result = Vec::new();
+                for (index_record_type, path, value) in absention_conditions {
+                    result.push(dream::Object::Identified(dream::Id {
+                        value: Digest::of_pathvalue(
+                            index_record_type.clone(),
+                            &path,
+                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
+                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                        .value,
+                    }));
+                }
+                result
+            };
+            Ok(Box::new(
+                self.index_transaction
+                    .search(
+                        &present_ids,
+                        &absent_ids,
+                        start_after_object.and_then(|start_after_object| {
+                            Some(dream::Id {
+                                value: start_after_object.value,
+                            })
+                        }),
+                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
+                    .map(|dream_id| {
+                        Ok(ObjectId {
+                            value: dream_id.value,
+                        })
+                    }),
+            ))
+        }
     };
 }
 
@@ -479,115 +587,6 @@ fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>>
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
-        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
-            Ok(ObjectsIterator {
-                data_table_iterator: self
-                    .index_transaction
-                    .database_transaction
-                    .object_id_and_path_to_value
-                    .iter(Bound::Unbounded, false)
-                    .with_context(
-                        || "Can not initiate iteration over object_id_and_path_to_value table",
-                    )?,
-                last_entry: None,
-            })
-        }
-
-        pub fn get_flattened(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<FlatObject> {
-            let mut flat_object: FlatObject = Vec::new();
-            let from_object_id_and_path =
-                &(object_id.clone(), path_prefix.clone());
-            let mut iterator = self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(from_object_id_and_path), false)
-                .with_context(
-                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
-                )?
-                .take_while(|entry| {
-                    Ok(entry.0.0 == *object_id
-                        && (path_prefix.is_empty()
-                            || entry.0.1 == *path_prefix
-                            || entry.0.1.starts_with(&path_prefix)))
-                });
-            loop {
-                if let Some(entry) = iterator.next()? {
-                    flat_object.push((
-                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
-                        entry.1,
-                    ));
-                } else {
-                    break;
-                }
-            }
-            Ok(flat_object)
-        }
-
-        pub fn get(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<Option<serde_json::Value>> {
-            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
-        }
-
-        pub fn select(
-            &'a self,
-            presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-            absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-            start_after_object: Option<ObjectId>,
-        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            let present_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in presention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
-                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
-                        .value,
-                    }));
-                }
-                result
-            };
-            let absent_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in absention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
-                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
-                        .value,
-                    }));
-                }
-                result
-            };
-            Ok(Box::new(
-                self.index_transaction
-                    .search(
-                        &present_ids,
-                        &absent_ids,
-                        start_after_object.and_then(|start_after_object| {
-                            Some(dream::Id {
-                                value: start_after_object.value,
-                            })
-                        }),
-                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
-                    .map(|dream_id| {
-                        Ok(ObjectId {
-                            value: dream_id.value,
-                        })
-                    }),
-            ))
-        }
 
     fn update_with_index(
         &mut self,
