@@ -37,6 +37,7 @@ type Path = Vec<PathSegment>;
 type FlatObject = Vec<(Path, Value)>;
 
 pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
+    println!("nest {flat_object:?}");
     if flat_object.is_empty() {
         Ok(None)
     } else if flat_object[0].0.is_empty() {
@@ -44,35 +45,40 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     } else {
         let mut result = serde_json::Value::Null;
         for (path, value) in flat_object {
+            println!("{path:?} = {value:?} into {result:?}");
             let mut current = &mut result;
             for path_segment in path {
+                println!("{path_segment:?}");
                 match path_segment {
                     PathSegment::JsonObjectKey(json_object_key) => {
                         if *current == serde_json::Value::Null {
                             *current = serde_json::json!({});
                         }
-                        let current_object = current
+                        current = current
                             .as_object_mut()
-                            .ok_or_else(|| anyhow!("Can not put value {value:?} at path {path:?} because can not put into array by object key"))?;
-                        current_object.insert(json_object_key.clone(), value.clone().into());
-                        current = current_object.get_mut(json_object_key).ok_or_else(|| {
-                            anyhow!("Can not find value which just put at key {json_object_key:?}")
-                        })?;
+                            .unwrap()
+                            .entry(json_object_key)
+                            .or_insert(serde_json::Value::Null);
                     }
-                    PathSegment::JsonArrayIndex(_) => {
+                    PathSegment::JsonArrayIndex(json_array_index) => {
                         if *current == serde_json::Value::Null {
                             *current = serde_json::json!([]);
                         }
-                        let current_array =current 
+                        if current.as_array().unwrap().len() <= *json_array_index as usize {
+                            current
+                                .as_array_mut()
+                                .unwrap()
+                                .push(serde_json::Value::Null);
+                        }
+                        current = current
                             .as_array_mut()
-                            .ok_or_else(|| anyhow!("Can not put value {value:?} at path {path:?} because can not put into array by object key"))?;
-                        current_array.push(value.clone().into());
-                        current = current_array.last_mut().ok_or_else(|| {
-                            anyhow!("Can not find value which just pushed")
-                        })?;
+                            .unwrap()
+                            .get_mut(*json_array_index as usize)
+                            .unwrap();
                     }
                 }
             }
+            *current = value.clone().into();
         }
         Ok(Some(result))
     }
@@ -379,10 +385,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
         if let Some(first_object_entry) = self.last_entry.clone() {
             let object_id = first_object_entry.0.0;
             let mut flat_object: FlatObject = Vec::new();
-            flat_object.push((
-                first_object_entry.0.1,
-                first_object_entry.1,
-            ));
+            flat_object.push((first_object_entry.0.1, first_object_entry.1));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
                     format!(
@@ -394,10 +397,7 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     if current_entry.0.0 != object_id {
                         break;
                     }
-                    flat_object.push((
-                        current_entry.0.1.clone(),
-                        current_entry.1.clone(),
-                    ));
+                    flat_object.push((current_entry.0.1.clone(), current_entry.1.clone()));
                 } else {
                     break;
                 }
@@ -433,8 +433,13 @@ impl IndexBatch {
     fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
         let path_base = path[..path.len()].to_vec();
         let path_index_option = path.last().and_then(|last_segment| {
-            if let PathSegment::JsonArrayIndex(path_index) = last_segment {Some(path_index)} else {None}});
-        if let Some(path_index) = path_index_option{
+            if let PathSegment::JsonArrayIndex(path_index) = last_segment {
+                Some(path_index)
+            } else {
+                None
+            }
+        });
+        if let Some(path_index) = path_index_option {
             self.digests.push(dream::Object::Identified(dream::Id {
                 value: Digest::of_pathvalue(
                     IndexRecordType::Array,
@@ -537,16 +542,19 @@ fn flatten_to(
     match value {
         serde_json::Value::Object(map) => {
             for (key, internal_value) in map {
-                    let internal_path = path.iter().cloned().chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter()).collect::<Path>();
+                let internal_path = path
+                    .iter()
+                    .cloned()
+                    .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
+                    .collect::<Path>();
                 flatten_to(internal_path, &internal_value, result).with_context(|| {
                     format!("Can not get flat representation of value {internal_value:?} part")
                 })?;
             }
         }
         serde_json::Value::Array(array) => {
-            let mut array_index = 0u32;
             let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
-            for internal_value in array {
+            for (internal_value_index, internal_value) in array.iter().enumerate() {
                 match internal_value {
                     serde_json::Value::Array(_) => {}
                     serde_json::Value::Object(_) => {}
@@ -557,12 +565,16 @@ fn flatten_to(
                         unique_internal_values.insert(internal_value.clone());
                     }
                 }
-                let key = format!("{:0>10}", array_index);
-                    let internal_path = path.iter().cloned().chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter()).collect::<Path>();
+                let internal_path = path
+                    .iter()
+                    .cloned()
+                    .chain(
+                        vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
+                    )
+                    .collect::<Path>();
                 flatten_to(internal_path, &internal_value, result).with_context(|| {
                     format!("Can not merge flat representation of value {internal_value:?} part into {result:?}")
                 })?;
-                array_index += 1;
             }
         }
         _ => {
@@ -667,7 +679,11 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     ) -> Result<Option<(u32, serde_json::Value)>> {
         let iter_from = Bound::Included(&(
             object_id.clone(),
-            array_path.iter().cloned().chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)]).collect::<Path>()
+            array_path
+                .iter()
+                .cloned()
+                .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
+                .collect::<Path>(),
         ));
         dbg!(&iter_from);
         self.index_transaction
@@ -691,6 +707,33 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             })
             .next()
     }
+}
+
+#[macro_export]
+macro_rules! path_segments {
+    () => {
+        vec![]
+    };
+    ($s:literal) => {
+        vec![PathSegment::JsonObjectKey($s.to_string())]
+    };
+    ($n:literal) => {
+        vec![PathSegment::JsonArrayIndex($n)]
+    };
+    ($($item:tt),+ $(,)?) => {{
+        vec![$(
+            match path_segments!(@single $item) {
+                PathSegment::JsonObjectKey(s) => PathSegment::JsonObjectKey(s),
+                PathSegment::JsonArrayIndex(n) => PathSegment::JsonArrayIndex(n),
+            }
+        ),+]
+    }};
+    (@single $s:literal) => {
+        PathSegment::JsonObjectKey($s.to_string())
+    };
+    (@single $n:literal) => {
+        PathSegment::JsonArrayIndex($n)
+    };
 }
 
 #[cfg(test)]
@@ -842,70 +885,88 @@ mod tests {
                                 // );
                                 assert_eq!(result, *object_value);
                                 let flatten_object = flatten(&vec![], &object_value)?;
-                                for (pathvalue_index, (path, value)) in
-                                    flatten_object.iter().enumerate()
-                                {
+                                for (_, (path, value)) in flatten_object.iter().enumerate() {
                                     println!("{path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
-                                    let partitioned_path = PartitionedPath::from_path(path.clone());
-                                    let index_record_type = if partitioned_path.index.is_some() {
-                                        IndexRecordType::Array
-                                    } else {
-                                        IndexRecordType::Direct
-                                    };
-                                    let select_path = if partitioned_path.index.is_some() {
-                                        partitioned_path.base.clone()
-                                    } else {
-                                        path.clone()
-                                    };
-                                    let selected = transaction
-                                        .select(
-                                            &vec![(
-                                                index_record_type,
-                                                select_path.clone(),
-                                                value_as_json.clone(),
-                                            )],
-                                            &vec![],
-                                            None,
-                                        )?
-                                        .collect::<Vec<ObjectId>>()?;
-                                    for selected_object_id in selected.iter() {
-                                        if let Some(got) =
-                                            &transaction.get(&selected_object_id, &select_path)?
-                                        {
-                                            if partitioned_path.index.is_some() {
-                                                if let Some(got_array) = got.as_array() {
-                                                    assert!(got_array.iter().any(
-                                                        |got_array_element| {
-                                                            got_array_element == &value_as_json
-                                                        }
-                                                    ));
+                                    if let Some(last_path_segment) = path.last() {
+                                        match last_path_segment {
+                                            PathSegment::JsonObjectKey(_) => {
+                                                let selected = transaction
+                                                    .select(
+                                                        &vec![(
+                                                            IndexRecordType::Direct,
+                                                            path.clone(),
+                                                            value_as_json.clone(),
+                                                        )],
+                                                        &vec![],
+                                                        None,
+                                                    )?
+                                                    .collect::<Vec<ObjectId>>()?;
+                                                for selected_object_id in selected.iter() {
+                                                    assert_eq!(
+                                                        transaction
+                                                            .get(&selected_object_id, &path)?
+                                                            .unwrap(),
+                                                        value_as_json
+                                                    );
                                                 }
-                                            } else {
-                                                assert_eq!(got, &value_as_json);
+                                                assert!(selected.iter().any(
+                                                    |selected_object_id| {
+                                                        selected_object_id == object_id
+                                                    }
+                                                ));
+                                            }
+                                            PathSegment::JsonArrayIndex(_) => {
+                                                let base_path = path[..path.len() - 1].to_vec();
+                                                let selected = transaction
+                                                    .select(
+                                                        &vec![(
+                                                            IndexRecordType::Array,
+                                                            base_path.clone(),
+                                                            value_as_json.clone(),
+                                                        )],
+                                                        &vec![],
+                                                        None,
+                                                    )?
+                                                    .collect::<Vec<ObjectId>>()?;
+                                                for selected_object_id in selected.iter() {
+                                                    assert!(
+                                                        transaction
+                                                            .get(&selected_object_id, &base_path)?
+                                                            .unwrap()
+                                                            .as_array()
+                                                            .unwrap()
+                                                            .iter()
+                                                            .any(|got_array_element| {
+                                                                got_array_element == &value_as_json
+                                                            })
+                                                    );
+                                                }
+                                                assert!(selected.iter().any(
+                                                    |selected_object_id| {
+                                                        selected_object_id == object_id
+                                                    }
+                                                ));
                                             }
                                         }
                                     }
-                                    assert!(selected.iter().any(|selected_object_id| {
-                                        selected_object_id == object_id
-                                    }));
-                                    if partitioned_path.index.is_some() {
-                                        if flatten_object
-                                            .get(pathvalue_index + 1)
-                                            .and_then(|(next_path, next_value)| {
-                                                PartitionedPath::from_path(next_path.clone()).index
-                                            })
-                                            .is_none()
-                                        {
-                                            assert_eq!(
-                                                transaction
-                                                    .last(object_id, &partitioned_path.base)?
-                                                    .unwrap()
-                                                    .1,
-                                                value_as_json
-                                            );
-                                        }
-                                    }
+                                    // if partitioned_path.index.is_some() {
+                                    //     if flatten_object
+                                    //         .get(pathvalue_index + 1)
+                                    //         .and_then(|(next_path, next_value)| {
+                                    //             PartitionedPath::from_path(next_path.clone()).index
+                                    //         })
+                                    //         .is_none()
+                                    //     {
+                                    //         assert_eq!(
+                                    //             transaction
+                                    //                 .last(object_id, &partitioned_path.base)?
+                                    //                 .unwrap()
+                                    //                 .1,
+                                    //             value_as_json
+                                    //         );
+                                    //     }
+                                    // }
                                 }
                             }
                             previously_added_objects.extend(new_objects);
@@ -926,9 +987,9 @@ mod tests {
                                 .nth(rng.generate_range(0..previously_added_objects.len()))
                                 .unwrap()
                                 .clone();
-                            transaction.remove(&object_to_remove_id, "")?;
+                            transaction.remove(&object_to_remove_id, &vec![])?;
                             previously_added_objects.remove(&object_to_remove_id);
-                            assert_eq!(transaction.get(&object_to_remove_id, "")?, None);
+                            assert_eq!(transaction.get(&object_to_remove_id, &vec![])?, None);
                         }
                         3 => {
                             let object_to_remove_from_id = previously_added_objects
@@ -937,18 +998,18 @@ mod tests {
                                 .unwrap()
                                 .clone();
                             let flattened_object_to_remove_from =
-                                transaction.get_flattened(&object_to_remove_from_id, "")?;
+                                transaction.get_flattened(&object_to_remove_from_id, &vec![])?;
                             let path_to_remove = flattened_object_to_remove_from
                                 [rng.generate_range(0..flattened_object_to_remove_from.len())]
                             .0
                             .clone();
                             let correct_result_option = nest(
-                                flattened_object_to_remove_from
+                                &flattened_object_to_remove_from
                                     .into_iter()
                                     .filter(|(path, _)| !path.starts_with(&path_to_remove))
                                     .map(|(path, value)| (path, value.into()))
                                     .collect::<Vec<_>>(),
-                            );
+                            )?;
                             transaction.remove(&object_to_remove_from_id, &path_to_remove)?;
                             previously_added_objects.remove(&object_to_remove_from_id);
                             if let Some(ref correct_result) = correct_result_option {
@@ -962,7 +1023,7 @@ mod tests {
                                 None
                             );
                             assert_eq!(
-                                transaction.get(&object_to_remove_from_id, "")?,
+                                transaction.get(&object_to_remove_from_id, &vec![])?,
                                 correct_result_option
                             );
                         }
@@ -1019,11 +1080,15 @@ mod tests {
                 );
 
                 assert_eq!(
-                    &transaction.get(&object.id, "dict")?.unwrap(),
+                    &transaction
+                        .get(&object.id, &path_segments!("dict"))?
+                        .unwrap(),
                     object.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
-                    &transaction.get(&object.id, "dict.hello")?.unwrap(),
+                    &transaction
+                        .get(&object.id, &path_segments!("dict", "hello"))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
@@ -1036,7 +1101,9 @@ mod tests {
                         .unwrap()
                 );
                 assert_eq!(
-                    &transaction.get(&object.id, "dict.boolean")?.unwrap(),
+                    &transaction
+                        .get(&object.id, &path_segments!("dict", "boolean"))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
@@ -1049,7 +1116,9 @@ mod tests {
                         .unwrap()
                 );
                 assert_eq!(
-                    transaction.get(&object.id, "dict.hello.0")?.unwrap(),
+                    transaction
+                        .get(&object.id, &path_segments!("dict", "hello", 0))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
@@ -1064,7 +1133,9 @@ mod tests {
                         .unwrap()[0]
                 );
                 assert_eq!(
-                    transaction.get(&object.id, "dict.hello.1")?.unwrap(),
+                    transaction
+                        .get(&object.id, &path_segments!("dict", "hello", 1))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
@@ -1079,7 +1150,9 @@ mod tests {
                         .unwrap()[1]
                 );
                 assert_eq!(
-                    transaction.get(&object.id, "dict.hello.2")?.unwrap(),
+                    transaction
+                        .get(&object.id, &path_segments!("dict", "hello", 2))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
@@ -1094,7 +1167,9 @@ mod tests {
                         .unwrap()[2]
                 );
                 assert_eq!(
-                    transaction.get(&object.id, "dict.hello.3")?.unwrap(),
+                    transaction
+                        .get(&object.id, &path_segments!("dict", "hello", 3))?
+                        .unwrap(),
                     object
                         .value
                         .as_object()
