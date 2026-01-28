@@ -708,6 +708,47 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     }
 }
 
+impl From<&str> for PathSegment {
+    fn from(s: &str) -> Self {
+        PathSegment::JsonObjectKey(s.to_string())
+    }
+}
+
+impl From<String> for PathSegment {
+    fn from(s: String) -> Self {
+        PathSegment::JsonObjectKey(s)
+    }
+}
+
+impl From<i32> for PathSegment {
+    fn from(i: i32) -> Self {
+        PathSegment::JsonArrayIndex(i as u32)
+    }
+}
+
+impl From<u32> for PathSegment {
+    fn from(i: u32) -> Self {
+        PathSegment::JsonArrayIndex(i)
+    }
+}
+
+impl From<usize> for PathSegment {
+    fn from(i: usize) -> Self {
+        PathSegment::JsonArrayIndex(i as u32)
+    }
+}
+
+#[macro_export]
+macro_rules! path_segments {
+    ( $( $seg:expr ),+ $(,)? ) => {
+        &vec![
+            $(
+                crate::PathSegment::from($seg)
+            ),+
+        ]
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -1054,22 +1095,13 @@ mod tests {
 
                 assert_eq!(
                     &transaction
-                        .get(
-                            &object.id,
-                            &vec![PathSegment::JsonObjectKey("dict".to_string())]
-                        )?
+                        .get(&object.id, path_segments!("dict"))?
                         .unwrap(),
                     object.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
                     &transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("hello".to_string())
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "hello"))?
                         .unwrap(),
                     object
                         .value
@@ -1084,13 +1116,7 @@ mod tests {
                 );
                 assert_eq!(
                     &transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("boolean".to_string())
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "boolean"))?
                         .unwrap(),
                     object
                         .value
@@ -1105,14 +1131,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("hello".to_string()),
-                                PathSegment::JsonArrayIndex(0)
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "hello", 0))?
                         .unwrap(),
                     object
                         .value
@@ -1129,14 +1148,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("hello".to_string()),
-                                PathSegment::JsonArrayIndex(1)
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "hello", 1))?
                         .unwrap(),
                     object
                         .value
@@ -1153,14 +1165,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("hello".to_string()),
-                                PathSegment::JsonArrayIndex(2)
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "hello", 2))?
                         .unwrap(),
                     object
                         .value
@@ -1177,14 +1182,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(
-                            &object.id,
-                            &vec![
-                                PathSegment::JsonObjectKey("dict".to_string()),
-                                PathSegment::JsonObjectKey("hello".to_string()),
-                                PathSegment::JsonArrayIndex(3)
-                            ]
-                        )?
+                        .get(&object.id, path_segments!("dict", "hello", 3))?
                         .unwrap(),
                     object
                         .value
