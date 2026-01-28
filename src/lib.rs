@@ -272,7 +272,6 @@ macro_rules! define_read_methods {
             object_id: &ObjectId,
             path_prefix: &Path,
         ) -> Result<FlatObject> {
-            println!("get_flattened {path_prefix:?}");
             let mut flat_object: FlatObject = Vec::new();
             let from_object_id_and_path =
                 &(object_id.clone(), path_prefix.clone());
@@ -285,7 +284,6 @@ macro_rules! define_read_methods {
                     || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
                 )?
                 .take_while(|entry| {
-                    println!("{:?} = {:?}", entry.0.1, entry.1);
                     Ok(entry.0.0 == *object_id
                         && (path_prefix.is_empty()
                             || entry.0.1 == *path_prefix
@@ -293,7 +291,6 @@ macro_rules! define_read_methods {
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
-                    println!("iter {:?} = {:?}", entry.0.1, entry.1);
                     flat_object.push((
                         entry.0.1.clone()[path_prefix.len()..].to_vec(),
                         entry.1,
@@ -893,7 +890,12 @@ mod tests {
                                 let result = transaction.get(&object_id, &vec![])?.unwrap();
                                 assert_eq!(result, *object_value);
                                 let flatten_object = flatten(&vec![], &object_value)?;
-                                for (_, (path, value)) in flatten_object.iter().enumerate() {
+                                // for (path, value) in flatten_object.iter() {
+                                //     println!("flatten_object: {path:?} = {value:?}");
+                                // }
+                                for (pathvalue_index, (path, value)) in
+                                    flatten_object.iter().enumerate()
+                                {
                                     // println!("{path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
@@ -924,7 +926,7 @@ mod tests {
                                                     }
                                                 ));
                                             }
-                                            PathSegment::JsonArrayIndex(_) => {
+                                            PathSegment::JsonArrayIndex(current_array_index) => {
                                                 let base_path = path[..path.len() - 1].to_vec();
                                                 let selected = transaction
                                                     .select(
@@ -955,6 +957,26 @@ mod tests {
                                                         selected_object_id == object_id
                                                     }
                                                 ));
+                                                if flatten_object
+                                                    .get(pathvalue_index + 1)
+                                                    .is_none_or(|(next_path, _)| {
+                                                        next_path.starts_with(&base_path)
+                                                            && next_path.get(base_path.len())
+                                                                != Some(
+                                                                    &PathSegment::JsonArrayIndex(
+                                                                        current_array_index + 1,
+                                                                    ),
+                                                                )
+                                                    })
+                                                {
+                                                    assert_eq!(
+                                                        transaction.last(object_id, &base_path)?,
+                                                        Some((
+                                                            *current_array_index,
+                                                            value_as_json.clone()
+                                                        ))
+                                                    );
+                                                }
                                             }
                                         }
                                     } else {
