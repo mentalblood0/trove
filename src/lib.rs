@@ -37,7 +37,6 @@ type Path = Vec<PathSegment>;
 type FlatObject = Vec<(Path, Value)>;
 
 pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
-    println!("nest {flat_object:?}");
     if flat_object.is_empty() {
         Ok(None)
     } else if flat_object[0].0.is_empty() {
@@ -45,10 +44,8 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     } else {
         let mut result = serde_json::Value::Null;
         for (path, value) in flat_object {
-            println!("{path:?} = {value:?} into {result:?}");
             let mut current = &mut result;
             for path_segment in path {
-                println!("{path_segment:?}");
                 match path_segment {
                     PathSegment::JsonObjectKey(json_object_key) => {
                         if *current == serde_json::Value::Null {
@@ -70,10 +67,11 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
                                 .unwrap()
                                 .push(serde_json::Value::Null);
                         }
+                        let current_len = current.as_array().unwrap().len();
                         current = current
                             .as_array_mut()
                             .unwrap()
-                            .get_mut(*json_array_index as usize)
+                            .get_mut((current_len - 1).min(*json_array_index as usize))
                             .unwrap();
                     }
                 }
@@ -431,7 +429,6 @@ impl IndexBatch {
     }
 
     fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
-        let path_base = path[..path.len()].to_vec();
         let path_index_option = path.last().and_then(|last_segment| {
             if let PathSegment::JsonArrayIndex(path_index) = last_segment {
                 Some(path_index)
@@ -440,10 +437,11 @@ impl IndexBatch {
             }
         });
         if let Some(path_index) = path_index_option {
+            let path_base = path[..path.len() - 1].to_vec();
             self.digests.push(dream::Object::Identified(dream::Id {
                 value: Digest::of_pathvalue(
                     IndexRecordType::Array,
-&path_base,
+                    &path_base,
                     &value.clone(),
                 )
                 .with_context(|| {
@@ -461,12 +459,12 @@ impl IndexBatch {
                         &path_base,
                         &self.object_id,
                         &value,
-                ).with_context(|| {
-                    format!(
-                        "Can not compute array type digest for path {path_base:?}, object id {:?} and value {value:?}",
-                        self.object_id
-                    )
-                })?
+                    ).with_context(|| {
+                        format!(
+                            "Can not compute array type digest for path {path_base:?}, object id {:?} and value {value:?}",
+                            self.object_id
+                        )
+                    })?
                     .value,
                 }));
         } else {
@@ -685,13 +683,11 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
                 .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
                 .collect::<Path>(),
         ));
-        dbg!(&iter_from);
         self.index_transaction
             .database_transaction
             .object_id_and_path_to_value
             .iter(iter_from, true)?
             .take_while(|((current_object_id, current_path), _)| {
-                dbg!(&current_path);
                 Ok(current_object_id == object_id && current_path.len() == array_path.len() + 1 && current_path.starts_with(&array_path))
             })
             .map(|((_, result_path), _)| {
@@ -878,15 +874,10 @@ mod tests {
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
                                 let result = transaction.get(&object_id, &vec![])?.unwrap();
-                                // println!("result = {}", serde_json::to_string(&result)?);
-                                // println!(
-                                //     "object_value = {}",
-                                //     serde_json::to_string(&object_value)?
-                                // );
                                 assert_eq!(result, *object_value);
                                 let flatten_object = flatten(&vec![], &object_value)?;
                                 for (_, (path, value)) in flatten_object.iter().enumerate() {
-                                    println!("{path:?} = {value:?}");
+                                    // println!("{path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
                                         match last_path_segment {
@@ -950,23 +941,6 @@ mod tests {
                                             }
                                         }
                                     }
-                                    // if partitioned_path.index.is_some() {
-                                    //     if flatten_object
-                                    //         .get(pathvalue_index + 1)
-                                    //         .and_then(|(next_path, next_value)| {
-                                    //             PartitionedPath::from_path(next_path.clone()).index
-                                    //         })
-                                    //         .is_none()
-                                    //     {
-                                    //         assert_eq!(
-                                    //             transaction
-                                    //                 .last(object_id, &partitioned_path.base)?
-                                    //                 .unwrap()
-                                    //                 .1,
-                                    //             value_as_json
-                                    //         );
-                                    //     }
-                                    // }
                                 }
                             }
                             previously_added_objects.extend(new_objects);
