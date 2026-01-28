@@ -272,6 +272,7 @@ macro_rules! define_read_methods {
             object_id: &ObjectId,
             path_prefix: &Path,
         ) -> Result<FlatObject> {
+            println!("get_flattened {path_prefix:?}");
             let mut flat_object: FlatObject = Vec::new();
             let from_object_id_and_path =
                 &(object_id.clone(), path_prefix.clone());
@@ -284,6 +285,7 @@ macro_rules! define_read_methods {
                     || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
                 )?
                 .take_while(|entry| {
+                    println!("{:?} = {:?}", entry.0.1, entry.1);
                     Ok(entry.0.0 == *object_id
                         && (path_prefix.is_empty()
                             || entry.0.1 == *path_prefix
@@ -291,6 +293,7 @@ macro_rules! define_read_methods {
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
+                    println!("iter {:?} = {:?}", entry.0.1, entry.1);
                     flat_object.push((
                         entry.0.1.clone()[path_prefix.len()..].to_vec(),
                         entry.1,
@@ -705,33 +708,6 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     }
 }
 
-#[macro_export]
-macro_rules! path_segments {
-    () => {
-        vec![]
-    };
-    ($s:literal) => {
-        vec![PathSegment::JsonObjectKey($s.to_string())]
-    };
-    ($n:literal) => {
-        vec![PathSegment::JsonArrayIndex($n)]
-    };
-    ($($item:tt),+ $(,)?) => {{
-        vec![$(
-            match path_segments!(@single $item) {
-                PathSegment::JsonObjectKey(s) => PathSegment::JsonObjectKey(s),
-                PathSegment::JsonArrayIndex(n) => PathSegment::JsonArrayIndex(n),
-            }
-        ),+]
-    }};
-    (@single $s:literal) => {
-        PathSegment::JsonObjectKey($s.to_string())
-    };
-    (@single $n:literal) => {
-        PathSegment::JsonArrayIndex($n)
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -1011,7 +987,7 @@ mod tests {
 
     #[test]
     fn test_dots_in_keys() {
-        let mut chest = new_default_chest("test_simple");
+        let mut chest = new_default_chest("test_dots_in_keys");
         let object_json = json!({"a.b.c": 1});
 
         chest
@@ -1055,13 +1031,22 @@ mod tests {
 
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict"))?
+                        .get(
+                            &object.id,
+                            &vec![PathSegment::JsonObjectKey("dict".to_string())]
+                        )?
                         .unwrap(),
                     object.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict", "hello"))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("hello".to_string())
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
@@ -1076,7 +1061,13 @@ mod tests {
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict", "boolean"))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("boolean".to_string())
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
@@ -1091,7 +1082,14 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 0))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("hello".to_string()),
+                                PathSegment::JsonArrayIndex(0)
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
@@ -1108,7 +1106,14 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 1))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("hello".to_string()),
+                                PathSegment::JsonArrayIndex(1)
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
@@ -1125,7 +1130,14 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 2))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("hello".to_string()),
+                                PathSegment::JsonArrayIndex(2)
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
@@ -1142,7 +1154,14 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 3))?
+                        .get(
+                            &object.id,
+                            &vec![
+                                PathSegment::JsonObjectKey("dict".to_string()),
+                                PathSegment::JsonObjectKey("hello".to_string()),
+                                PathSegment::JsonArrayIndex(3)
+                            ]
+                        )?
                         .unwrap(),
                     object
                         .value
