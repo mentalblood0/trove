@@ -916,6 +916,29 @@ mod tests {
                                                 ));
                                             }
                                         }
+                                    } else {
+                                        let selected = transaction
+                                            .select(
+                                                &vec![(
+                                                    IndexRecordType::Direct,
+                                                    vec![],
+                                                    value_as_json.clone(),
+                                                )],
+                                                &vec![],
+                                                None,
+                                            )?
+                                            .collect::<Vec<ObjectId>>()?;
+                                        for selected_object_id in selected.iter() {
+                                            assert_eq!(
+                                                transaction
+                                                    .get(&selected_object_id, &vec![])?
+                                                    .unwrap(),
+                                                value_as_json
+                                            );
+                                        }
+                                        assert!(selected.iter().any(|selected_object_id| {
+                                            selected_object_id == object_id
+                                        }));
                                     }
                                 }
                             }
