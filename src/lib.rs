@@ -372,27 +372,29 @@ macro_rules! define_read_methods {
                     .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
                     .collect::<Path>(),
             ));
-            self.index_transaction
-                    .database_transaction
-                    .object_id_and_path_to_value
-                    .iter(iter_from, true)?
-                    .take_while(|((current_object_id, current_path), _)| {
-                        Ok(current_object_id == object_id && current_path.starts_with(&array_path) &&
-                            if let Some(PathSegment::JsonArrayIndex(_))= current_path.get(array_path.len()) {
-                                true
-                            } else {
-                                false
-                            })
-                    })
-                    .map(|((_, result_path), _)| {
-                        Ok(
-                            match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
-                                PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
-                                PathSegment::JsonArrayIndex(array_index) => *array_index
-                            } + 1
-                        )
-                    })
-                    .next()
+            let mut found_object = false;
+            Ok(self.index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(iter_from, true)?
+                .take_while(|((current_object_id, current_path), _)| {
+                    Ok(current_object_id == object_id && current_path.starts_with(&array_path) &&
+                        if let Some(PathSegment::JsonArrayIndex(_))= current_path.get(array_path.len()) {
+                            true
+                        } else {
+                            false
+                        })
+                })
+                .map(|((_, result_path), _)| {
+                    found_object = true;
+                    Ok(
+                        match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
+                            PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
+                            PathSegment::JsonArrayIndex(array_index) => *array_index
+                        } + 1
+                    )
+                })
+                .next()?.or_else(|| if found_object {None} else {Some(0)}))
         }
 
         pub fn last(
@@ -937,7 +939,7 @@ mod tests {
                                             PathSegment::JsonObjectKey(_) => {
                                                 assert_eq!(
                                                     transaction.len(object_id, &base_path).unwrap(),
-                                                    None
+                                                    Some(0)
                                                 );
                                                 let selected = transaction
                                                     .select(
@@ -1006,22 +1008,14 @@ mod tests {
                                                                 )
                                                     })
                                                 {
-                                                    if transaction
-                                                        .len(object_id, &base_path)?
-                                                        .unwrap()
-                                                        > 1
-                                                    {
-                                                        transaction
-                                                            .remove(object_id, path)
-                                                            .unwrap();
-                                                        transaction
-                                                            .push(
-                                                                object_id,
-                                                                &base_path,
-                                                                value_as_json.clone(),
-                                                            )
-                                                            .unwrap();
-                                                    }
+                                                    transaction.remove(object_id, path).unwrap();
+                                                    transaction
+                                                        .push(
+                                                            object_id,
+                                                            &base_path,
+                                                            value_as_json.clone(),
+                                                        )
+                                                        .unwrap();
                                                     assert_eq!(
                                                         transaction
                                                             .len(object_id, &base_path)
