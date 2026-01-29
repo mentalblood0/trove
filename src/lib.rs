@@ -377,14 +377,14 @@ macro_rules! define_read_methods {
                 .object_id_and_path_to_value
                 .iter(iter_from, true)?
                 .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path.len() == array_path.len() + 1 && current_path.starts_with(&array_path))
+                    Ok(current_object_id == object_id && current_path.starts_with(&array_path))
                 })
                 .map(|((_, result_path), _)| {
                     Ok(
-                        match result_path.last().ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
+                        match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
                             PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
                             PathSegment::JsonArrayIndex(array_index) => *array_index
-                        }
+                        } + 1
                     )
                 })
                 .next()
@@ -399,7 +399,7 @@ macro_rules! define_read_methods {
                 let result_path = array_path
                     .iter()
                     .cloned()
-                    .chain(vec![PathSegment::JsonArrayIndex(array_len)].into_iter())
+                    .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
                     .collect::<Vec<_>>();
                 Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
                     || anyhow!("Can not get last element of array at path {result_path:?}"),
@@ -715,6 +715,24 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .with_context(|| format!("Can not flush-remove index batch {index_batch:?}"))?;
         Ok(())
     }
+
+    pub fn push(
+        &mut self,
+        object_id: &ObjectId,
+        array_path: &Path,
+        value: serde_json::Value,
+    ) -> Result<u32> {
+        let array_len = self
+            .len(object_id, array_path)?
+            .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
+        let push_path = array_path
+            .iter()
+            .cloned()
+            .chain(vec![PathSegment::JsonArrayIndex(array_len)].into_iter())
+            .collect::<Vec<_>>();
+        self.update(object_id.clone(), push_path, value)?;
+        Ok(array_len)
+    }
 }
 
 impl From<&str> for PathSegment {
@@ -899,16 +917,14 @@ mod tests {
                                 })
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
+                                // println!("{object_id:?}");
                                 let result = transaction.get(&object_id, &vec![])?.unwrap();
                                 assert_eq!(result, *object_value);
                                 let flatten_object = flatten(&vec![], &object_value)?;
-                                // for (path, value) in flatten_object.iter() {
-                                //     println!("flatten_object: {path:?} = {value:?}");
-                                // }
                                 for (pathvalue_index, (path, value)) in
                                     flatten_object.iter().enumerate()
                                 {
-                                    // println!("{path:?} = {value:?}");
+                                    // println!("flatten_object {path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
                                         match last_path_segment {
@@ -981,12 +997,32 @@ mod tests {
                                                                 )
                                                     })
                                                 {
+                                                    if transaction
+                                                        .len(object_id, &base_path)?
+                                                        .unwrap()
+                                                        > 1
+                                                    {
+                                                        transaction
+                                                            .remove(object_id, path)
+                                                            .unwrap();
+                                                        transaction
+                                                            .push(
+                                                                object_id,
+                                                                &base_path,
+                                                                value_as_json.clone(),
+                                                            )
+                                                            .unwrap();
+                                                    }
                                                     assert_eq!(
-                                                        transaction.len(object_id, &base_path)?,
-                                                        Some(*current_array_index),
+                                                        transaction
+                                                            .len(object_id, &base_path)
+                                                            .unwrap(),
+                                                        Some(*current_array_index + 1),
                                                     );
                                                     assert_eq!(
-                                                        transaction.last(object_id, &base_path)?,
+                                                        transaction
+                                                            .last(object_id, &base_path)
+                                                            .unwrap(),
                                                         Some(value_as_json.clone())
                                                     );
                                                 }
