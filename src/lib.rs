@@ -363,51 +363,7 @@ macro_rules! define_read_methods {
             ))
         }
 
-        pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
-            let iter_from = Bound::Included(&(
-                object_id.clone(),
-                array_path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
-                    .collect::<Path>(),
-            ));
-            self.index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(iter_from, true)?
-                .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path.starts_with(&array_path))
-                })
-                .map(|((_, result_path), _)| {
-                    Ok(
-                        match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
-                            PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
-                            PathSegment::JsonArrayIndex(array_index) => *array_index
-                        } + 1
-                    )
-                })
-                .next()
-        }
 
-        pub fn last(
-            &self,
-            object_id: &ObjectId,
-            array_path: &Path,
-        ) -> Result<Option<serde_json::Value>> {
-            if let Some(array_len) = self.len(object_id, array_path)? {
-                let result_path = array_path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
-                    .collect::<Vec<_>>();
-                Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
-                    || anyhow!("Can not get last element of array at path {result_path:?}"),
-                )?))
-            } else {
-                Ok(None)
-            }
-        }
     };
 }
 
@@ -643,6 +599,57 @@ fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>>
 
 impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
     define_read_methods!();
+
+    pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
+        let iter_from = Bound::Included(&(
+            object_id.clone(),
+            array_path
+                .iter()
+                .cloned()
+                .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
+                .collect::<Path>(),
+        ));
+        self.index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(iter_from, true)?
+                .take_while(|((current_object_id, current_path), _)| {
+                    Ok(current_object_id == object_id && current_path.starts_with(&array_path) &&
+                        if let Some(PathSegment::JsonArrayIndex(_))= current_path.get(array_path.len()) {
+                            true
+                        } else {
+                            false
+                        })
+                })
+                .map(|((_, result_path), _)| {
+                    Ok(
+                        match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
+                            PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
+                            PathSegment::JsonArrayIndex(array_index) => *array_index
+                        } + 1
+                    )
+                })
+                .next()
+    }
+
+    pub fn last(
+        &self,
+        object_id: &ObjectId,
+        array_path: &Path,
+    ) -> Result<Option<serde_json::Value>> {
+        if let Some(array_len) = self.len(object_id, array_path)? {
+            let result_path = array_path
+                .iter()
+                .cloned()
+                .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
+                .collect::<Vec<_>>();
+            Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
+                || anyhow!("Can not get last element of array at path {result_path:?}"),
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
 
     fn update_with_index(
         &mut self,
@@ -927,8 +934,13 @@ mod tests {
                                     // println!("flatten_object {path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
+                                        let base_path = path[..path.len() - 1].to_vec();
                                         match last_path_segment {
                                             PathSegment::JsonObjectKey(_) => {
+                                                assert_eq!(
+                                                    transaction.len(object_id, &base_path).unwrap(),
+                                                    None
+                                                );
                                                 let selected = transaction
                                                     .select(
                                                         &vec![(
@@ -955,7 +967,6 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
-                                                let base_path = path[..path.len() - 1].to_vec();
                                                 let selected = transaction
                                                     .select(
                                                         &vec![(
