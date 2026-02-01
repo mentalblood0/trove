@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lawn = { git = "https://github.com/mentalblood0/lawn" }
 dream = { git = "https://github.com/mentalblood0/dream" }
 anyhow = { version = "1.0.100", features = ["std", "backtrace"] }
 uuid = { version = "1.19", features = ["v7"] }
@@ -16,7 +15,5 @@ serde_json = { version = "1.0.145", features = ["std", "unbounded_depth"] }
 
 [dev-dependencies]
 nanorand = "0.8"
-criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
 serde-saphyr = { git = "https://github.com/bourumir-wyngs/serde-saphyr" }
-typetag = { version = "0.2" }
