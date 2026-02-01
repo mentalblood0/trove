@@ -137,7 +137,7 @@ pub struct Chest {
     pub index: trove_database::Index,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChestConfig {
     pub index: trove_database::IndexConfig,
 }
