@@ -20,6 +20,26 @@ impl ObjectId {
     }
 }
 
+impl serde::Serialize for ObjectId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        u128::from_be_bytes(self.value).serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ObjectId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(ObjectId {
+            value: u128::deserialize(deserializer)?.to_be_bytes(),
+        })
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Object {
     pub id: ObjectId,
