@@ -435,6 +435,16 @@ macro_rules! define_read_methods {
                 Ok(None)
             }
         }
+
+        pub fn contains_object_with_id(&self, object_id: &ObjectId) -> Result<bool> {
+            Ok(self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(Bound::Included(&(object_id.clone(), vec![])), false)?
+                .next()?
+                .is_some())
+        }
     };
 }
 
@@ -944,14 +954,13 @@ mod tests {
                                 })
                                 .collect::<Vec<_>>();
                             for (object_id, object_value) in new_objects.iter() {
-                                // println!("{object_id:?}");
+                                assert_eq!(transaction.contains_object_with_id(object_id)?, true);
                                 let result = transaction.get(&object_id, &vec![])?.unwrap();
                                 assert_eq!(result, *object_value);
                                 let flatten_object = flatten(&vec![], &object_value)?;
                                 for (pathvalue_index, (path, value)) in
                                     flatten_object.iter().enumerate()
                                 {
-                                    // println!("flatten_object {path:?} = {value:?}");
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
                                         let base_path = path[..path.len() - 1].to_vec();
