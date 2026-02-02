@@ -442,6 +442,7 @@ macro_rules! define_read_methods {
                 .database_transaction
                 .object_id_and_path_to_value
                 .iter(Bound::Included(&(object_id.clone(), vec![])), false)?
+                .take_while(|((current_object_id, _), _)| Ok(current_object_id == object_id))
                 .next()?
                 .is_some())
         }
@@ -1106,6 +1107,7 @@ mod tests {
                                 .clone();
                             transaction.remove(&object_to_remove_id, &vec![])?;
                             previously_added_objects.remove(&object_to_remove_id);
+                            assert_eq!(transaction.get(&object_to_remove_id, &vec![])?, None);
                             assert_eq!(transaction.get(&object_to_remove_id, &vec![])?, None);
                         }
                         3 => {
