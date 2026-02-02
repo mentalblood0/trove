@@ -25,7 +25,10 @@ impl serde::Serialize for ObjectId {
     where
         S: serde::Serializer,
     {
-        u128::from_be_bytes(self.value).serialize(serializer)
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .encode(&self.value)
+            .serialize(serializer)
     }
 }
 
@@ -34,9 +37,15 @@ impl<'de> serde::Deserialize<'de> for ObjectId {
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(ObjectId {
-            value: u128::deserialize(deserializer)?.to_be_bytes(),
-        })
+        use base64::Engine;
+        let s = String::deserialize(deserializer)?;
+        let value = base64::engine::general_purpose::STANDARD
+            .decode(s.as_bytes())
+            .map_err(serde::de::Error::custom)?;
+        let value: [u8; 16] = value.try_into().map_err(|v: Vec<u8>| {
+            serde::de::Error::custom(format!("expected 16 bytes, got {}", v.len()))
+        })?;
+        Ok(ObjectId { value })
     }
 }
 

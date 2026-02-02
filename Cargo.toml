@@ -10,6 +10,7 @@ uuid = { version = "1.19", features = ["v7"] }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 fallible-iterator = { version = "0.3", features = ["std"] }
 bincode = { version = "2.0", features = ["derive"] }
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["std", "unbounded_depth"] }
 
