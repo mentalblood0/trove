@@ -237,7 +237,7 @@ dependencies = [
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#9d215509023e93a2bc9f379e5973ad1f3b99a1ae"
+source = "git+https://github.com/mentalblood0/dream#8a0aafeadd70e7c4d01cf8a01e797e3f3948a03c"
 dependencies = [
  "anyhow",
  "bincode",

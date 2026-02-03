@@ -481,6 +481,27 @@ macro_rules! define_read_methods {
                 .next()?
                 .is_some())
         }
+
+        pub fn contains_element(
+            &self,
+            object_id: &ObjectId,
+            array_path: &Path,
+            element: &Value,
+        ) -> Result<bool> {
+            self.index_transaction.has_object_with_tag(&dream::Object::Identified(dream::Id {
+                value: Digest::of_path_object_id_and_value(
+                    array_path,
+                    object_id,
+                    element,
+                ).with_context(|| {
+                    format!(
+                        "Can not compute array type digest for path {array_path:?}, object id {:?} and value {element:?}",
+                        object_id
+                    )
+                })?
+                .value
+            }))
+        }
     };
 }
 
@@ -1013,6 +1034,12 @@ mod tests {
                                         match last_path_segment {
                                             PathSegment::JsonObjectKey(_) => {
                                                 assert_eq!(
+                                                    transaction.contains_element(
+                                                        object_id, &base_path, value
+                                                    )?,
+                                                    false
+                                                );
+                                                assert_eq!(
                                                     transaction.len(object_id, &base_path).unwrap(),
                                                     Some(0)
                                                 );
@@ -1042,6 +1069,12 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
+                                                assert_eq!(
+                                                    transaction.contains_element(
+                                                        object_id, &base_path, value
+                                                    )?,
+                                                    true
+                                                );
                                                 let selected = transaction
                                                     .select(
                                                         &vec![(
