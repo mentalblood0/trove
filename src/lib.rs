@@ -862,7 +862,7 @@ impl From<usize> for PathSegment {
 #[macro_export]
 macro_rules! path_segments {
     ( $( $seg:expr ),+ $(,)? ) => {
-        &vec![
+        vec![
             $(
                 crate::PathSegment::from($seg)
             ),+
@@ -1278,13 +1278,13 @@ mod tests {
 
                 assert_eq!(
                     &transaction
-                        .get(&object.id, path_segments!("dict"))?
+                        .get(&object.id, &path_segments!("dict"))?
                         .unwrap(),
                     object.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, path_segments!("dict", "hello"))?
+                        .get(&object.id, &path_segments!("dict", "hello"))?
                         .unwrap(),
                     object
                         .value
@@ -1299,7 +1299,7 @@ mod tests {
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, path_segments!("dict", "boolean"))?
+                        .get(&object.id, &path_segments!("dict", "boolean"))?
                         .unwrap(),
                     object
                         .value
@@ -1314,7 +1314,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, path_segments!("dict", "hello", 0))?
+                        .get(&object.id, &path_segments!("dict", "hello", 0))?
                         .unwrap(),
                     object
                         .value
@@ -1331,7 +1331,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, path_segments!("dict", "hello", 1))?
+                        .get(&object.id, &path_segments!("dict", "hello", 1))?
                         .unwrap(),
                     object
                         .value
@@ -1348,7 +1348,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, path_segments!("dict", "hello", 2))?
+                        .get(&object.id, &path_segments!("dict", "hello", 2))?
                         .unwrap(),
                     object
                         .value
@@ -1365,7 +1365,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, path_segments!("dict", "hello", 3))?
+                        .get(&object.id, &path_segments!("dict", "hello", 3))?
                         .unwrap(),
                     object
                         .value
