@@ -455,6 +455,19 @@ macro_rules! define_read_methods {
                 .next()?
                 .is_some())
         }
+
+        pub fn contains_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
+            Ok(self
+                .index_transaction
+                .database_transaction
+                .object_id_and_path_to_value
+                .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
+                .take_while(|((current_object_id, current_path), _)| {
+                    Ok(current_object_id == object_id && current_path == path)
+                })
+                .next()?
+                .is_some())
+        }
     };
 }
 
@@ -971,6 +984,7 @@ mod tests {
                                 for (pathvalue_index, (path, value)) in
                                     flatten_object.iter().enumerate()
                                 {
+                                    assert_eq!(transaction.contains_path(object_id, path)?, true);
                                     let value_as_json: serde_json::Value = value.clone().into();
                                     if let Some(last_path_segment) = path.last() {
                                         let base_path = path[..path.len() - 1].to_vec();
