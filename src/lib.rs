@@ -26,7 +26,7 @@ impl serde::Serialize for ObjectId {
         S: serde::Serializer,
     {
         use base64::Engine;
-        base64::engine::general_purpose::STANDARD
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(&self.value)
             .serialize(serializer)
     }
@@ -39,7 +39,7 @@ impl<'de> serde::Deserialize<'de> for ObjectId {
     {
         use base64::Engine;
         let s = String::deserialize(deserializer)?;
-        let value = base64::engine::general_purpose::STANDARD
+        let value = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(s.as_bytes())
             .map_err(serde::de::Error::custom)?;
         let value: [u8; 16] = value.try_into().map_err(|v: Vec<u8>| {
