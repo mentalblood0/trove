@@ -1,3 +1,41 @@
+//! # Trove
+//!
+//! A JSON document database with indexed storage built on top of [dream](https://github.com/robamu/dream) index.
+//!
+//! ## Overview
+//!
+//! Trove provides a transactional storage for JSON documents with the following features:
+//! - Document storage with auto-generated UUID v7 identifiers
+//! - Path-based access to nested JSON structures
+//! - Indexed queries based on path-value presence/absence
+//! - ACID-compliant transactions (write and read)
+//! - Flat storage with nested reconstruction
+//!
+//! ## Architecture
+//!
+//! The library uses:
+//! - **dream** for inverted indexing
+//! - **bincode** for efficient binary encoding
+//! - **serde_json** for JSON handling
+//! - **xxhash** for digest computation
+//!
+//! ## Basic Usage
+//!
+//! ```ignore
+//! use trove::{Chest, ChestConfig, ObjectId, path_segments};
+//! use serde_json::json;
+//!
+//! // Create a chest with configuration
+//! let chest = Chest::new(config)?;
+//!
+//! // Perform write transaction
+//! chest.lock_all_and_write(|tx| {
+//!     let id = tx.insert(json!({"name": "test", "value": 42}))?;
+//!     let name = tx.get(&id, &path_segments!("name"))?;
+//!     Ok(())
+//! })?;
+//! ```
+
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 
@@ -5,6 +43,10 @@ use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
 
+/// A globally unique identifier for objects in the database.
+///
+/// Generated using UUID v7 for time-ordered unique identifiers.
+/// Serialized as base64 URL-safe without padding for compact storage.
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
@@ -49,22 +91,56 @@ impl<'de> serde::Deserialize<'de> for ObjectId {
     }
 }
 
+/// A JSON document stored in the database.
+///
+/// Contains a unique identifier and its JSON value.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Object {
+    /// The unique identifier of this object.
     pub id: ObjectId,
+    /// The JSON value stored in this object.
     pub value: serde_json::Value,
 }
 
+/// Represents a single segment in a JSON path.
+///
+/// Paths are constructed from segments that can be either:
+/// - `JsonObjectKey`: A string key for accessing object properties
+/// - `JsonArrayIndex`: A numeric index for accessing array elements
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
 pub enum PathSegment {
+    /// A key name for accessing a JSON object property.
     JsonObjectKey(String),
+    /// A zero-based index for accessing a JSON array element.
     JsonArrayIndex(u32),
 }
 
+/// A path through a JSON document.
+///
+/// Constructed from a vector of [`PathSegment`] values. Use the [`path_segments!`] macro
+/// for convenient construction.
 type Path = Vec<PathSegment>;
 
+/// A flattened representation of a JSON object.
+///
+/// Each entry contains a path to a leaf value and the value itself.
+/// This format is used internally for storage and is converted to/from
+/// nested JSON using [`nest`] and [`flatten`].
 type FlatObject = Vec<(Path, Value)>;
 
+/// Reconstructs a nested JSON value from a flat representation.
+///
+/// Takes a [`FlatObject`] (a list of path-value pairs) and reconstructs
+/// the original nested JSON structure.
+///
+/// # Arguments
+///
+/// * `flat_object` - A flat representation containing paths and values.
+///
+/// # Returns
+///
+/// - `Ok(Some(value))` - The reconstructed JSON value
+/// - `Ok(None)` - If the flat object was empty
 pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     if flat_object.is_empty() {
         Ok(None)
@@ -111,12 +187,30 @@ pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
     }
 }
 
+/// A storable value type that can be persisted in the database.
+///
+/// This enum represents primitive JSON values that can be stored.
+/// Arrays and objects are not directly storable - they are flattened
+/// into path-value pairs using [`flatten`].
+///
+/// # Variants
+///
+/// - `Null` - Represents JSON null
+/// - `Integer` - A 64-bit signed integer
+/// - `Float` - A 64-bit floating point number
+/// - `Bool` - A boolean value
+/// - `String` - A UTF-8 string
 #[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
 pub enum Value {
+    /// The null value.
     Null,
+    /// A signed 64-bit integer.
     Integer(i64),
+    /// A 64-bit floating point number.
     Float(f64),
+    /// A boolean value.
     Bool(bool),
+    /// A UTF-8 string.
     String(String),
 }
 
@@ -162,16 +256,43 @@ dream::define_index!(trove_database {
     use crate::Path;
 });
 
+/// The main database struct that provides access to the storage.
+///
+/// A `Chest` is the entry point for all database operations. It wraps
+/// the underlying Dream index and provides methods for creating transactions.
+///
+/// # Creating a Chest
+///
+/// ```ignore
+/// use trove::ChestConfig;
+///
+/// let config: ChestConfig = serde_yaml::from_str(&std::fs::read_to_string("config.yml")?)?;
+/// let chest = Chest::new(config)?;
+/// ```
 pub struct Chest {
+    /// The underlying Dream index.
     pub index: trove_database::Index,
 }
 
+/// Configuration for a [`Chest`].
+///
+/// Contains the configuration for the underlying Dream index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChestConfig {
+    /// The index configuration.
     pub index: trove_database::IndexConfig,
 }
 
 impl Chest {
+    /// Creates a new [`Chest`] with the given configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The chest configuration containing index settings.
+    ///
+    /// # Returns
+    ///
+    /// A new `Chest` instance, or an error if the index cannot be created.
     pub fn new(config: ChestConfig) -> Result<Self> {
         Ok(Self {
             index: trove_database::Index::new(config.index.clone()).with_context(|| {
@@ -180,6 +301,19 @@ impl Chest {
         })
     }
 
+    /// Acquires an exclusive write lock and performs operations in a transaction.
+    ///
+    /// This method locks all writes to the database and calls the provided
+    /// closure with a [`WriteTransaction`]. The closure can perform any number
+    /// of read and write operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - A closure that receives a mutable `WriteTransaction` and returns `Result<()>`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(&Self)` on success, allowing method chaining.
     pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
     where
         F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<()>,
@@ -195,6 +329,18 @@ impl Chest {
         Ok(self)
     }
 
+    /// Acquires all write locks and performs read-only operations.
+    ///
+    /// This method prevents any writes from occurring during the read operation
+    /// and calls the provided closure with a [`ReadTransaction`].
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - A closure that receives a `ReadTransaction` and returns `Result<()>`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(&Self)` on success.
     pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
     where
         F: FnMut(ReadTransaction) -> Result<()>,
@@ -216,10 +362,19 @@ struct Digest {
     value: [u8; 16],
 }
 
+/// The type of index record, determining how values are indexed.
+///
+/// This affects how values are matched during [`select`] queries:
+/// - `Direct`: Matches exact path-value pairs
+/// - `Array`: Matches values within arrays (deduplicates duplicates)
 #[repr(u8)]
 #[derive(Clone, Debug)]
 pub enum IndexRecordType {
+    /// Direct path-value indexing.
+    /// Use this for object properties and scalar values.
     Direct = 0,
+    /// Array indexing with deduplication.
+    /// Use this for values inside arrays.
     Array = 1,
 }
 
@@ -266,14 +421,30 @@ impl Digest {
     }
 }
 
+/// A read-only transaction for querying the database.
+///
+/// Provides methods to read objects and their values without modification.
+/// Created via [`Chest::lock_all_writes_and_read`].
 pub struct ReadTransaction<'a> {
+    /// The underlying Dream read transaction.
     pub index_transaction: trove_database::ReadTransaction<'a>,
 }
 
+/// A write transaction for modifying the database.
+///
+/// Provides methods to insert, update, and remove objects.
+/// Created via [`Chest::lock_all_and_write`].
 pub struct WriteTransaction<'a, 'b, 'c> {
+    /// The underlying Dream write transaction.
     pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
 }
 
+/// An iterator over all objects in the database.
+///
+/// Yields complete [`Object`] instances with nested JSON values.
+/// Created via [`ReadTransaction::objects`].
+///
+/// This iterator groups all path-value pairs belonging to the same object.
 pub struct ObjectsIterator<'a> {
     data_table_iterator:
         Box<dyn FallibleIterator<Item = ((ObjectId, Path), Value), Error = Error> + 'a>,
@@ -282,6 +453,13 @@ pub struct ObjectsIterator<'a> {
 
 macro_rules! define_read_methods {
     () => {
+        /// Returns an iterator over all objects in the database.
+        ///
+        /// Each yielded object contains the complete nested JSON structure.
+        ///
+        /// # Returns
+        ///
+        /// An iterator yielding `Result<Object>`.
         pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
             Ok(ObjectsIterator {
                 data_table_iterator: self
@@ -296,6 +474,18 @@ macro_rules! define_read_methods {
             })
         }
 
+        /// Gets a flattened representation of an object's value at a path prefix.
+        ///
+        /// Returns path-value pairs relative to the given path prefix.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object to query.
+        /// * `path_prefix` - The path prefix to start from (empty vec for entire object).
+        ///
+        /// # Returns
+        ///
+        /// A `FlatObject` containing all path-value pairs under the prefix.
         pub fn get_flattened(
             &'a self,
             object_id: &ObjectId,
@@ -331,6 +521,20 @@ macro_rules! define_read_methods {
             Ok(flat_object)
         }
 
+        /// Gets a nested JSON value from an object at a given path.
+        ///
+        /// Retrieves the value at the specified path, reconstructing nested
+        /// structures from the flat storage.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object to query.
+        /// * `path_prefix` - The path to the value.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(Some(value))` - The value at the path.
+        /// - `Ok(None)` - If no value exists at the path.
         pub fn get(
             &'a self,
             object_id: &ObjectId,
@@ -339,6 +543,21 @@ macro_rules! define_read_methods {
             nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
         }
 
+        /// Selects objects matching specified presence and absence conditions.
+        ///
+        /// Uses the inverted index to find objects that contain certain values
+        /// at certain paths (presention_conditions) and do NOT contain others
+        /// (absention_conditions).
+        ///
+        /// # Arguments
+        ///
+        /// * `presention_conditions` - Values that must be present.
+        /// * `absention_conditions` - Values that must be absent.
+        /// * `start_after_object` - Pagination: start after this object ID.
+        ///
+        /// # Returns
+        ///
+        /// An iterator yielding matching `ObjectId`s.
         pub fn select(
             &'a self,
             presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
@@ -392,6 +611,20 @@ macro_rules! define_read_methods {
             ))
         }
 
+        /// Gets the length of an array at a given path.
+        ///
+        /// Returns the number of elements in the array at the specified path.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object containing the array.
+        /// * `array_path` - The path to the array.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(Some(len))` - The number of elements in the array.
+        /// - `Ok(Some(0))` - If the array doesn't exist yet.
+        /// - `Ok(None)` - If the path doesn't exist.
         pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
             let iter_from = Bound::Included(&(
                 object_id.clone(),
@@ -426,6 +659,19 @@ macro_rules! define_read_methods {
                 .next()?.or_else(|| if found_object {None} else {Some(0)}))
         }
 
+        /// Gets the last element of an array at a given path.
+        ///
+        /// Returns the last element of the array at the specified path.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object containing the array.
+        /// * `array_path` - The path to the array.
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(Some(value))` - The last element of the array.
+        /// - `Ok(None)` - If the array is empty or doesn't exist.
         pub fn last(
             &self,
             object_id: &ObjectId,
@@ -445,6 +691,15 @@ macro_rules! define_read_methods {
             }
         }
 
+        /// Checks if an object with the given ID exists.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID to check for.
+        ///
+        /// # Returns
+        ///
+        /// `Ok(true)` if the object exists, `Ok(false)` otherwise.
         pub fn contains_object_with_id(&self, object_id: &ObjectId) -> Result<bool> {
             Ok(self
                 .index_transaction
@@ -456,6 +711,14 @@ macro_rules! define_read_methods {
                 .is_some())
         }
 
+        /// Checks if any path starting with the given prefix exists.
+        ///
+        /// Returns `true` if there are any entries at or under the given path.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object to check.
+        /// * `path` - The path prefix to check.
         pub fn contains_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
             Ok(self
                 .index_transaction
@@ -469,6 +732,14 @@ macro_rules! define_read_methods {
                 .is_some())
         }
 
+        /// Checks if an exact path exists.
+        ///
+        /// Returns `true` only if there's a value at the exact specified path.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object to check.
+        /// * `path` - The exact path to check.
         pub fn contains_exact_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
             Ok(self
                 .index_transaction
@@ -482,6 +753,16 @@ macro_rules! define_read_methods {
                 .is_some())
         }
 
+        /// Checks if an array contains a specific element.
+        ///
+        /// Returns `true` if the value exists in the array at the given path.
+        /// Uses deduplication for array indexing.
+        ///
+        /// # Arguments
+        ///
+        /// * `object_id` - The ID of the object containing the array.
+        /// * `array_path` - The path to the array.
+        /// * `element` - The element value to search for.
         pub fn contains_element(
             &self,
             object_id: &ObjectId,
@@ -727,6 +1008,25 @@ fn flatten_to(
     Ok(())
 }
 
+/// Flattens a JSON value into path-value pairs.
+///
+/// Recursively traverses the JSON structure and produces a list of
+/// (path, value) pairs representing all leaf values.
+///
+/// - Object properties become path segments with their key names
+/// - Array elements become path segments with their indices
+/// - Primitive values (null, bool, number, string) become the final values
+///
+/// Arrays store only unique values to support deduplicated indexing.
+///
+/// # Arguments
+///
+/// * `path` - The current path prefix
+/// * `value` - The JSON value to flatten
+///
+/// # Returns
+///
+/// A vector of (path, value) pairs representing all leaf values.
 fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>> {
     let mut result: Vec<(Path, Value)> = Vec::new();
     flatten_to(path.clone(), value, &mut result).with_context(|| {
@@ -757,6 +1057,20 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         Ok(object_id)
     }
 
+    /// Updates or inserts a value at a specific path within an object.
+    ///
+    /// If the object doesn't exist, it will be created. If the path doesn't exist,
+    /// intermediate structures will be created.
+    ///
+    /// # Arguments
+    ///
+    /// * `object_id` - The ID of the object to update (or create).
+    /// * `path` - The path where the value should be stored (empty vec for root).
+    /// * `value` - The JSON value to store.
+    ///
+    /// # Returns
+    ///
+    /// The object ID.
     pub fn update(
         &mut self,
         object_id: ObjectId,
@@ -771,15 +1085,45 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         Ok(object_id)
     }
 
+    /// Inserts a new object with an auto-generated ID.
+    ///
+    /// A new [`ObjectId`] is generated and the value is stored at the root path.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The JSON value to store as a new object.
+    ///
+    /// # Returns
+    ///
+    /// The newly generated `ObjectId`.
     pub fn insert(&mut self, value: serde_json::Value) -> Result<ObjectId> {
         let id = ObjectId::new();
         self.update(id.clone(), vec![], value)
     }
 
+    /// Inserts an object with a specific ID.
+    ///
+    /// The provided object's ID is used instead of generating a new one.
+    ///
+    /// # Arguments
+    ///
+    /// * `object` - The object to insert.
+    ///
+    /// # Returns
+    ///
+    /// The object's ID.
     pub fn insert_with_id(&mut self, object: Object) -> Result<ObjectId> {
         self.update(object.id, vec![], object.value)
     }
 
+    /// Removes a value at a given path prefix.
+    ///
+    /// Removes all entries at or under the specified path from the object.
+    ///
+    /// # Arguments
+    ///
+    /// * `object_id` - The ID of the object to modify.
+    /// * `path_prefix` - The path prefix to remove (empty vec removes entire object).
     pub fn remove(&mut self, object_id: &ObjectId, path_prefix: &Path) -> Result<()> {
         let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
         let paths_to_remove = self
@@ -810,6 +1154,19 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         Ok(())
     }
 
+    /// Pushes a value onto the end of an array.
+    ///
+    /// Appends a new element to the array at the specified path.
+    ///
+    /// # Arguments
+    ///
+    /// * `object_id` - The ID of the object containing the array.
+    /// * `array_path` - The path to the array.
+    /// * `value` - The value to append.
+    ///
+    /// # Returns
+    ///
+    /// The index at which the value was inserted.
     pub fn push(
         &mut self,
         object_id: &ObjectId,
@@ -859,6 +1216,16 @@ impl From<usize> for PathSegment {
     }
 }
 
+/// Constructs a [`Path`] from a list of segments.
+///
+/// This macro provides a convenient way to create paths using a
+/// comma-separated list of segment values.
+///
+/// # Arguments
+///
+/// A list of segments that can be:
+/// - `&str` or `String` - Creates a [`PathSegment::JsonObjectKey`]
+/// - Integer types (`i32`, `u32`, `usize`) - Creates a [`PathSegment::JsonArrayIndex`]
 #[macro_export]
 macro_rules! path_segments {
     ( $( $seg:expr ),+ $(,)? ) => {
@@ -870,6 +1237,14 @@ macro_rules! path_segments {
     };
 }
 
+/// Tests for the trove database.
+///
+/// These tests verify the core functionality including:
+/// - Basic CRUD operations
+/// - Path-based access to nested structures
+/// - Array operations (push, len, last)
+/// - Select queries with presence/absence conditions
+/// - Edge cases like dots in object keys
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
