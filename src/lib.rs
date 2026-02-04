@@ -18,23 +18,6 @@
 //! - **bincode** for efficient binary encoding
 //! - **serde_json** for JSON handling
 //! - **xxhash** for digest computation
-//!
-//! ## Basic Usage
-//!
-//! ```ignore
-//! use trove::{Chest, ChestConfig, ObjectId, path_segments};
-//! use serde_json::json;
-//!
-//! // Create a chest with configuration
-//! let chest = Chest::new(config)?;
-//!
-//! // Perform write transaction
-//! chest.lock_all_and_write(|tx| {
-//!     let id = tx.insert(json!({"name": "test", "value": 42}))?;
-//!     let name = tx.get(&id, &path_segments!("name"))?;
-//!     Ok(())
-//! })?;
-//! ```
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
@@ -260,15 +243,6 @@ dream::define_index!(trove_database {
 ///
 /// A `Chest` is the entry point for all database operations. It wraps
 /// the underlying Dream index and provides methods for creating transactions.
-///
-/// # Creating a Chest
-///
-/// ```ignore
-/// use trove::ChestConfig;
-///
-/// let config: ChestConfig = serde_yaml::from_str(&std::fs::read_to_string("config.yml")?)?;
-/// let chest = Chest::new(config)?;
-/// ```
 pub struct Chest {
     /// The underlying Dream index.
     pub index: trove_database::Index,
