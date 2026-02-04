@@ -783,7 +783,32 @@ macro_rules! define_read_methods {
                 .value
             }))
         }
+
+    pub fn get_element_index(
+        &self,
+        object_id: &ObjectId,
+        array_path: &Path,
+        element: &Value,
+    ) -> Result<Option<u32>> {
+        Ok(self.index_transaction.search(&vec![dream::Object::Identified(dream::Id {
+                value: Digest::of_path_object_id_and_value(
+                    array_path,
+                    object_id,
+                    element,
+                ).with_context(|| {
+                    format!(
+                        "Can not compute array type digest for path {array_path:?}, object id {:?} and value {element:?}",
+                        object_id
+                    )
+                })?
+                .value
+            })], &vec![], None)?
+            .next()?
+            .map(|dream_id| IndexBatch::dream_id_to_u32(dream_id)))
+    }
+
     };
+
 }
 
 impl<'a> ReadTransaction<'a> {
@@ -907,6 +932,10 @@ impl IndexBatch {
         let mut value = [0u8; 16];
         value[12..].copy_from_slice(&input.to_be_bytes());
         dream::Id { value }
+    }
+
+    fn dream_id_to_u32(id: dream::Id) -> u32 {
+        u32::from_be_bytes(id.value[12..16].try_into().unwrap())
     }
 
     fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &Vec<dream::Object>)> + '_> {
@@ -1449,6 +1478,14 @@ mod tests {
                                                         object_id, &base_path, value
                                                     )?,
                                                     true
+                                                );
+                                                assert_eq!(
+                                                    transaction
+                                                        .get_element_index(
+                                                            object_id, &base_path, value
+                                                        )
+                                                        .unwrap(),
+                                                    Some(*current_array_index)
                                                 );
                                                 let selected = transaction
                                                     .select(
