@@ -340,14 +340,13 @@ struct Digest {
 ///
 /// This affects how values are matched during [`select`] queries:
 /// - `Direct`: Matches exact path-value pairs
-/// - `Array`: Matches values within arrays (deduplicates duplicates)
+/// - `Array`: Matches values within arrays
 #[repr(u8)]
 #[derive(Clone, Debug)]
 pub enum IndexRecordType {
     /// Direct path-value indexing.
     /// Use this for object properties and scalar values.
     Direct = 0,
-    /// Array indexing with deduplication.
     /// Use this for values inside arrays.
     Array = 1,
 }
@@ -730,7 +729,6 @@ macro_rules! define_read_methods {
         /// Checks if an array contains a specific element.
         ///
         /// Returns `true` if the value exists in the array at the given path.
-        /// Uses deduplication for array indexing.
         ///
         /// # Arguments
         ///
@@ -1019,8 +1017,6 @@ fn flatten_to(
 /// - Object properties become path segments with their key names
 /// - Array elements become path segments with their indices
 /// - Primitive values (null, bool, number, string) become the final values
-///
-/// Arrays store only unique values to support deduplicated indexing.
 ///
 /// # Arguments
 ///

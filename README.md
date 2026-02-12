@@ -180,7 +180,7 @@ Note: Arrays and objects are not stored directly - they are flattened into path-
 ### Index Record Types
 
 - **`Direct`**: For object properties and scalar values. Matches exact path-value pairs.
-- **`Array`**: For values inside arrays. Arrays values in trove are deduplicate on insertion to avoid often unnecessary indexing complexity.
+- **`Array`**: For values inside arrays.
 
 ## Testing
 
