@@ -19,7 +19,7 @@
 //! - **serde_json** for JSON handling
 //! - **xxhash** for digest computation
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Bound;
 
 use anyhow::{Context, Error, Result, anyhow};
@@ -975,18 +975,18 @@ fn flatten_to(
             }
         }
         serde_json::Value::Array(array) => {
-            let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
+            // let mut unique_internal_values: HashSet<serde_json::Value> = HashSet::new();
             for (internal_value_index, internal_value) in array.iter().enumerate() {
-                match internal_value {
-                    serde_json::Value::Array(_) => {}
-                    serde_json::Value::Object(_) => {}
-                    _ => {
-                        if unique_internal_values.contains(&internal_value) {
-                            continue;
-                        }
-                        unique_internal_values.insert(internal_value.clone());
-                    }
-                }
+                // match internal_value {
+                //     serde_json::Value::Array(_) => {}
+                //     serde_json::Value::Object(_) => {}
+                //     _ => {
+                //         if unique_internal_values.contains(&internal_value) {
+                //             continue;
+                //         }
+                //         unique_internal_values.insert(internal_value.clone());
+                //     }
+                // }
                 let internal_path = path
                     .iter()
                     .cloned()
