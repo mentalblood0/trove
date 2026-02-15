@@ -43,6 +43,13 @@ impl ObjectId {
             value: *uuid::Uuid::now_v7().as_bytes(),
         }
     }
+    pub fn to_string(&self) -> String {
+        serde_json::to_value(self)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
 }
 
 impl serde::Serialize for ObjectId {
