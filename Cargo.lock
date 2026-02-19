@@ -41,11 +41,12 @@ dependencies = [
 
 [[package]]
 name = "annotate-snippets"
-version = "0.12.11"
+version = "0.12.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16e4850548ff4a25a77ce3bda7241874e17fb702ea551f0cc62a2dbe052f1272"
+checksum = "c86cd1c51b95d71dde52bca69ed225008f6ff4c8cc825b08042aa1ef823e1980"
 dependencies = [
  "anstyle",
+ "memchr",
  "unicode-width",
 ]
 
@@ -125,9 +126,9 @@ checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "bumpalo"
-version = "3.19.1"
+version = "3.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
+checksum = "5c6f81257d10a0f602a294ae4182251151ff97dbb504ef9afcdda4a64b24d9b4"
 
 [[package]]
 name = "cfg-if"
@@ -144,7 +145,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#ac42487692424870846904ed21ac0560d472a231"
+source = "git+https://github.com/mentalblood0/dream#88eeb66487fa04937d1c130f6c23bd57c47a177d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -281,7 +282,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#f05f1e2633ca79320297df7cdf37973e6dfe5e0b"
+source = "git+https://github.com/mentalblood0/lawn#b4bb8b0773a0cacebf154e4b717ca74478ab5421"
 dependencies = [
  "anyhow",
  "bincode",
@@ -521,7 +522,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.19"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#592f3f17ae609d756b8802c2ccdf6232dd771afc"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#c5e01fcf23745fb0679c9c258a78733f98a244bb"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -580,9 +581,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "syn"
-version = "2.0.115"
+version = "2.0.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e614ed320ac28113fa64972c4262d5dbc89deacdfd00c34a3e4cea073243c12"
+checksum = "3df424c70518695237746f84cede799c9c58fcb37450d7b23716568cc8bc69cb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -629,9 +630,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "537dd038a89878be9b64dd4bd1b260315c1bb94f4d784956b81e27a088d9a09e"
+checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "unicode-width"

@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::ops::Bound;
 
-use anyhow::{Context, Error, Result, anyhow};
+use anyhow::{anyhow, Context, Error, Result};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
 
@@ -294,10 +294,10 @@ impl Chest {
     ///
     /// # Returns
     ///
-    /// `Ok(&Self)` on success, allowing method chaining.
-    pub fn lock_all_and_write<'a, F>(&'a mut self, mut f: F) -> Result<&'a mut Self>
+    /// `Ok(R)` on success, where `R` is what user-provided closure returns.
+    pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
     where
-        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<()>,
+        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
     {
         self.index
             .lock_all_and_write(|index_write_transaction| {
@@ -305,9 +305,7 @@ impl Chest {
                     index_transaction: index_write_transaction,
                 })
             })
-            .with_context(|| "Can not lock index and initiate write transaction")?;
-
-        Ok(self)
+            .with_context(|| "Can not lock index and initiate write transaction")
     }
 
     /// Acquires all write locks and performs read-only operations.
@@ -321,10 +319,10 @@ impl Chest {
     ///
     /// # Returns
     ///
-    /// `Ok(&Self)` on success.
-    pub fn lock_all_writes_and_read<F>(&self, mut f: F) -> Result<&Self>
+    /// `Ok(R)` on success, where `R` is what user-provided closure returns.
+    pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
     where
-        F: FnMut(ReadTransaction) -> Result<()>,
+        F: FnMut(ReadTransaction) -> Result<R>,
     {
         self.index
             .lock_all_writes_and_read(|index_read_transaction| {
@@ -332,10 +330,9 @@ impl Chest {
                     index_transaction: index_read_transaction,
                 })
             })
-            .with_context(
-                || "Can not lock all write operations on index and initiate read transaction",
-            )?;
-        Ok(self)
+            .with_context(|| {
+                "Can not lock all write operations on index and initiate read transaction"
+            })
     }
 }
 
@@ -447,9 +444,9 @@ macro_rules! define_read_methods {
                     .database_transaction
                     .object_id_and_path_to_value
                     .iter(Bound::Unbounded, false)
-                    .with_context(
-                        || "Can not initiate iteration over object_id_and_path_to_value table",
-                    )?,
+                    .with_context(|| {
+                        "Can not initiate iteration over object_id_and_path_to_value table"
+                    })?,
                 last_entry: None,
             })
         }
@@ -472,28 +469,27 @@ macro_rules! define_read_methods {
             path_prefix: &Path,
         ) -> Result<FlatObject> {
             let mut flat_object: FlatObject = Vec::new();
-            let from_object_id_and_path =
-                &(object_id.clone(), path_prefix.clone());
+            let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
             let mut iterator = self
                 .index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
                 .iter(Bound::Included(from_object_id_and_path), false)
-                .with_context(
-                    || format!("Can not initiate iteration over object_id_and_path_to_value table from key {from_object_id_and_path:?}"),
-                )?
+                .with_context(|| {
+                    format!(
+                        "Can not initiate iteration over object_id_and_path_to_value table from \
+                         key {from_object_id_and_path:?}"
+                    )
+                })?
                 .take_while(|entry| {
-                    Ok(entry.0.0 == *object_id
+                    Ok(entry.0 .0 == *object_id
                         && (path_prefix.is_empty()
-                            || entry.0.1 == *path_prefix
-                            || entry.0.1.starts_with(&path_prefix)))
+                            || entry.0 .1 == *path_prefix
+                            || entry.0 .1.starts_with(&path_prefix)))
                 });
             loop {
                 if let Some(entry) = iterator.next()? {
-                    flat_object.push((
-                        entry.0.1.clone()[path_prefix.len()..].to_vec(),
-                        entry.1,
-                    ));
+                    flat_object.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
                 } else {
                     break;
                 }
@@ -520,7 +516,16 @@ macro_rules! define_read_methods {
             object_id: &ObjectId,
             path_prefix: &Path,
         ) -> Result<Option<serde_json::Value>> {
-            nest(&self.get_flattened(object_id, path_prefix).with_context(|| format!("Can not get part at path prefix {path_prefix:?} of flattened object with id {object_id:?}"))?)
+            nest(
+                &self
+                    .get_flattened(object_id, path_prefix)
+                    .with_context(|| {
+                        format!(
+                            "Can not get part at path prefix {path_prefix:?} of flattened object \
+                             with id {object_id:?}"
+                        )
+                    })?,
+            )
         }
 
         /// Selects objects matching specified presence and absence conditions.
@@ -551,8 +556,20 @@ macro_rules! define_read_methods {
                         value: Digest::of_pathvalue(
                             index_record_type.clone(),
                             &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is present"))?,
-                        ).with_context(|| format!("Can not compute digest of presention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                            &value.clone().try_into().with_context(|| {
+                                format!(
+                                    "Can not convert json value {value:?} to database storable \
+                                     value so to select objects where ({index_record_type:?}, \
+                                     {path:?}, {value:?}) is present"
+                                )
+                            })?,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "Can not compute digest of presention condition \
+                                 ({index_record_type:?}), {path:?}, {value:?}"
+                            )
+                        })?
                         .value,
                     }));
                 }
@@ -565,8 +582,20 @@ macro_rules! define_read_methods {
                         value: Digest::of_pathvalue(
                             index_record_type.clone(),
                             &path,
-                            &value.clone().try_into().with_context(|| format!("Can not convert json value {value:?} to database storable value so to select objects where ({index_record_type:?}, {path:?}, {value:?}) is absent"))?,
-                        ).with_context(|| format!("Can not compute digest of absention condition ({index_record_type:?}), {path:?}, {value:?}"))?
+                            &value.clone().try_into().with_context(|| {
+                                format!(
+                                    "Can not convert json value {value:?} to database storable \
+                                     value so to select objects where ({index_record_type:?}, \
+                                     {path:?}, {value:?}) is absent"
+                                )
+                            })?,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "Can not compute digest of absention condition \
+                                 ({index_record_type:?}), {path:?}, {value:?}"
+                            )
+                        })?
                         .value,
                     }));
                 }
@@ -582,7 +611,14 @@ macro_rules! define_read_methods {
                                 value: start_after_object.value,
                             })
                         }),
-                    ).with_context(|| format!("Can not initiate search in index with presention conditions {presention_conditions:?} and absention conditions {absention_conditions:?}"))?
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Can not initiate search in index with presention conditions \
+                             {presention_conditions:?} and absention conditions \
+                             {absention_conditions:?}"
+                        )
+                    })?
                     .map(|dream_id| {
                         Ok(ObjectId {
                             value: dream_id.value,
@@ -615,13 +651,17 @@ macro_rules! define_read_methods {
                     .collect::<Path>(),
             ));
             let mut found_object = false;
-            Ok(self.index_transaction
+            Ok(self
+                .index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
                 .iter(iter_from, true)?
                 .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path.starts_with(&array_path) &&
-                        if let Some(PathSegment::JsonArrayIndex(_))= current_path.get(array_path.len()) {
+                    Ok(current_object_id == object_id
+                        && current_path.starts_with(&array_path)
+                        && if let Some(PathSegment::JsonArrayIndex(_)) =
+                            current_path.get(array_path.len())
+                        {
                             true
                         } else {
                             false
@@ -629,14 +669,20 @@ macro_rules! define_read_methods {
                 })
                 .map(|((_, result_path), _)| {
                     found_object = true;
-                    Ok(
-                        match result_path.get(array_path.len()).ok_or_else(|| anyhow!("Can not get last element of result path {result_path:?}"))? {
-                            PathSegment::JsonObjectKey(object_key) => return Err(anyhow!("Last element of result path appear to be JSON object string key {object_key}, but expected JSON array index number")),
-                            PathSegment::JsonArrayIndex(array_index) => *array_index
-                        } + 1
-                    )
+                    Ok(match result_path.get(array_path.len()).ok_or_else(|| {
+                        anyhow!("Can not get last element of result path {result_path:?}")
+                    })? {
+                        PathSegment::JsonObjectKey(object_key) => {
+                            return Err(anyhow!(
+                                "Last element of result path appear to be JSON object string key \
+                                 {object_key}, but expected JSON array index number"
+                            ))
+                        }
+                        PathSegment::JsonArrayIndex(array_index) => *array_index,
+                    } + 1)
                 })
-                .next()?.or_else(|| if found_object {None} else {Some(0)}))
+                .next()?
+                .or_else(|| if found_object { None } else { Some(0) }))
         }
 
         /// Gets the last element of an array at a given path.
@@ -748,46 +794,47 @@ macro_rules! define_read_methods {
             array_path: &Path,
             element: &Value,
         ) -> Result<bool> {
-            self.index_transaction.has_object_with_tag(&dream::Object::Identified(dream::Id {
-                value: Digest::of_path_object_id_and_value(
-                    array_path,
-                    object_id,
-                    element,
-                ).with_context(|| {
-                    format!(
-                        "Can not compute array type digest for path {array_path:?}, object id {:?} and value {element:?}",
-                        object_id
-                    )
-                })?
-                .value
-            }))
+            self.index_transaction
+                .has_object_with_tag(&dream::Object::Identified(dream::Id {
+                    value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                        .with_context(|| {
+                            format!(
+                                "Can not compute array type digest for path {array_path:?}, \
+                                 object id {:?} and value {element:?}",
+                                object_id
+                            )
+                        })?
+                        .value,
+                }))
         }
 
-    pub fn get_element_index(
-        &self,
-        object_id: &ObjectId,
-        array_path: &Path,
-        element: &Value,
-    ) -> Result<Option<u32>> {
-        Ok(self.index_transaction.search(&vec![dream::Object::Identified(dream::Id {
-                value: Digest::of_path_object_id_and_value(
-                    array_path,
-                    object_id,
-                    element,
-                ).with_context(|| {
-                    format!(
-                        "Can not compute array type digest for path {array_path:?}, object id {:?} and value {element:?}",
-                        object_id
-                    )
-                })?
-                .value
-            })], &vec![], None)?
-            .next()?
-            .map(|dream_id| IndexBatch::dream_id_to_u32(dream_id)))
-    }
-
+        pub fn get_element_index(
+            &self,
+            object_id: &ObjectId,
+            array_path: &Path,
+            element: &Value,
+        ) -> Result<Option<u32>> {
+            Ok(self
+                .index_transaction
+                .search(
+                    &vec![dream::Object::Identified(dream::Id {
+                        value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                            .with_context(|| {
+                                format!(
+                                    "Can not compute array type digest for path {array_path:?}, \
+                                     object id {:?} and value {element:?}",
+                                    object_id
+                                )
+                            })?
+                            .value,
+                    })],
+                    &vec![],
+                    None,
+                )?
+                .next()?
+                .map(|dream_id| IndexBatch::dream_id_to_u32(dream_id)))
+        }
     };
-
 }
 
 impl<'a> ReadTransaction<'a> {
@@ -806,9 +853,9 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                 .with_context(|| "Can not get first data table entry")?;
         }
         if let Some(first_object_entry) = self.last_entry.clone() {
-            let object_id = first_object_entry.0.0;
+            let object_id = first_object_entry.0 .0;
             let mut flat_object: FlatObject = Vec::new();
-            flat_object.push((first_object_entry.0.1, first_object_entry.1));
+            flat_object.push((first_object_entry.0 .1, first_object_entry.1));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
                     format!(
@@ -817,10 +864,10 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     )
                 })?;
                 if let Some(current_entry) = &self.last_entry {
-                    if current_entry.0.0 != object_id {
+                    if current_entry.0 .0 != object_id {
                         break;
                     }
-                    flat_object.push((current_entry.0.1.clone(), current_entry.1.clone()));
+                    flat_object.push((current_entry.0 .1.clone(), current_entry.1.clone()));
                 } else {
                     break;
                 }
@@ -864,33 +911,28 @@ impl IndexBatch {
         if let Some(path_index) = path_index_option {
             let path_base = path[..path.len() - 1].to_vec();
             self.digests.push(dream::Object::Identified(dream::Id {
-                value: Digest::of_pathvalue(
-                    IndexRecordType::Array,
-                    &path_base,
-                    &value.clone(),
-                )
-                .with_context(|| {
-                    format!(
-                        "Can not compute array type digest for path {path_base:?} and value {value:?}",
-                    )
-                })?
-                .value,
+                value: Digest::of_pathvalue(IndexRecordType::Array, &path_base, &value.clone())
+                    .with_context(|| {
+                        format!(
+                            "Can not compute array type digest for path {path_base:?} and value \
+                             {value:?}",
+                        )
+                    })?
+                    .value,
             }));
             self.array_digests
                 .entry(*path_index)
                 .or_insert(Vec::new())
                 .push(dream::Object::Identified(dream::Id {
-                    value: Digest::of_path_object_id_and_value(
-                        &path_base,
-                        &self.object_id,
-                        &value,
-                    ).with_context(|| {
-                        format!(
-                            "Can not compute array type digest for path {path_base:?}, object id {:?} and value {value:?}",
-                            self.object_id
-                        )
-                    })?
-                    .value,
+                    value: Digest::of_path_object_id_and_value(&path_base, &self.object_id, &value)
+                        .with_context(|| {
+                            format!(
+                                "Can not compute array type digest for path {path_base:?}, object \
+                                 id {:?} and value {value:?}",
+                                self.object_id
+                            )
+                        })?
+                        .value,
                 }));
         } else {
             self.digests.push(dream::Object::Identified(dream::Id {
@@ -955,7 +997,12 @@ impl IndexBatch {
         for (dream_id, tags) in self.iter() {
             index_transaction
                 .remove_tags_from_object(&dream::Object::Identified(dream_id.clone()), tags)
-                .with_context(|| format!("Can not remove tags {tags:?} from object with id {dream_id:?} in dream index"))?;
+                .with_context(|| {
+                    format!(
+                        "Can not remove tags {tags:?} from object with id {dream_id:?} in dream \
+                         index"
+                    )
+                })?;
         }
         Ok(self)
     }
@@ -1000,7 +1047,10 @@ fn flatten_to(
                     )
                     .collect::<Path>();
                 flatten_to(internal_path, &internal_value, result).with_context(|| {
-                    format!("Can not merge flat representation of value {internal_value:?} part into {result:?}")
+                    format!(
+                        "Can not merge flat representation of value {internal_value:?} part into \
+                         {result:?}"
+                    )
                 })?;
             }
         }
@@ -1036,7 +1086,10 @@ fn flatten_to(
 fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>> {
     let mut result: Vec<(Path, Value)> = Vec::new();
     flatten_to(path.clone(), value, &mut result).with_context(|| {
-        format!("Can not merge flat representation of value {value:?} part at path {path:?} into {result:?}")
+        format!(
+            "Can not merge flat representation of value {value:?} part at path {path:?} into \
+             {result:?}"
+        )
     })?;
     Ok(result)
 }
@@ -1054,7 +1107,14 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         for (internal_path, internal_value) in flatten(&path, &value)
             .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
         {
-            index_batch.push(internal_path.clone(), internal_value.clone()).with_context(|| format!("Can not push path-value pair ({internal_path:?}, {internal_value:?}) into index batch"))?;
+            index_batch
+                .push(internal_path.clone(), internal_value.clone())
+                .with_context(|| {
+                    format!(
+                        "Can not push path-value pair ({internal_path:?}, {internal_value:?}) \
+                         into index batch"
+                    )
+                })?;
             self.index_transaction
                 .database_transaction
                 .object_id_and_path_to_value
@@ -1084,7 +1144,18 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
         value: serde_json::Value,
     ) -> Result<ObjectId> {
         let mut index_batch = IndexBatch::new(object_id.clone());
-        self.update_with_index(object_id.clone(), path.clone(), value.clone(), &mut index_batch).with_context(|| format!("Can not update object with id {object_id:?} with path-value pair ({path:?}, {value:?}) also updating index batch {index_batch:?}"))?;
+        self.update_with_index(
+            object_id.clone(),
+            path.clone(),
+            value.clone(),
+            &mut index_batch,
+        )
+        .with_context(|| {
+            format!(
+                "Can not update object with id {object_id:?} with path-value pair ({path:?}, \
+                 {value:?}) also updating index batch {index_batch:?}"
+            )
+        })?;
         index_batch
             .flush_insert(self.index_transaction)
             .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
@@ -1136,12 +1207,24 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             .index_transaction
             .database_transaction
             .object_id_and_path_to_value
-            .iter(Bound::Included(from_object_id_and_path), false).with_context(|| format!("Can not initiate iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?}"))?
+            .iter(Bound::Included(from_object_id_and_path), false)
+            .with_context(|| {
+                format!(
+                    "Can not initiate iteration over object_id_and_path_to_value table starting \
+                     from key {from_object_id_and_path:?}"
+                )
+            })?
             .take_while(|((current_object_id, current_path), _)| {
-                Ok(*current_object_id == *object_id
-                    && current_path.starts_with(&path_prefix))
+                Ok(*current_object_id == *object_id && current_path.starts_with(&path_prefix))
             })
-            .collect::<Vec<_>>().with_context(|| format!("Can not collect from iteration over object_id_and_path_to_value table starting from key {from_object_id_and_path:?} taking while object id is {object_id:?} and path starts with {path_prefix:?}"))?;
+            .collect::<Vec<_>>()
+            .with_context(|| {
+                format!(
+                    "Can not collect from iteration over object_id_and_path_to_value table \
+                     starting from key {from_object_id_and_path:?} taking while object id is \
+                     {object_id:?} and path starts with {path_prefix:?}"
+                )
+            })?;
         let mut index_batch = IndexBatch::new(object_id.clone());
         for ((_, current_path), current_value) in paths_to_remove.into_iter() {
             self.index_transaction
@@ -1151,7 +1234,10 @@ impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
             index_batch
                 .push(current_path.clone(), current_value.clone())
                 .with_context(|| {
-                    format!("Can not push path-value pair ({current_path:?}, {current_value:?}) into index batch")
+                    format!(
+                        "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
+                         index batch"
+                    )
                 })?;
         }
         index_batch
@@ -1476,17 +1562,15 @@ mod tests {
                                                     )?
                                                     .collect::<Vec<ObjectId>>()?;
                                                 for selected_object_id in selected.iter() {
-                                                    assert!(
-                                                        transaction
-                                                            .get(&selected_object_id, &base_path)?
-                                                            .unwrap()
-                                                            .as_array()
-                                                            .unwrap()
-                                                            .iter()
-                                                            .any(|got_array_element| {
-                                                                got_array_element == &value_as_json
-                                                            })
-                                                    );
+                                                    assert!(transaction
+                                                        .get(&selected_object_id, &base_path)?
+                                                        .unwrap()
+                                                        .as_array()
+                                                        .unwrap()
+                                                        .iter()
+                                                        .any(|got_array_element| {
+                                                            got_array_element == &value_as_json
+                                                        }));
                                                 }
                                                 assert!(selected.iter().any(
                                                     |selected_object_id| {
