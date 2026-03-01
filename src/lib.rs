@@ -5,8 +5,10 @@ use anyhow::{anyhow, Context, Error, Result};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
 
+pub extern crate anyhow;
 pub extern crate dream;
 pub extern crate paste;
+pub extern crate serde;
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
@@ -238,16 +240,22 @@ macro_rules! define_chest {
     }) => {
         #[allow(dead_code)]
         mod $chest_name {
-            use $crate::dream;
-            use $crate::paste::paste;
+            use $crate::{
+                serde::{Serialize, Deserialize},
+                anyhow::{Result, Error, Context, anyhow},
+                dream, paste::paste
+            };
+
+            use $crate::ObjectId;
+            use $crate::Path;
 
             paste! {
                 dream::define_index!(trove_database(
                     $( $bucket_name ),*
                 ) {
-                    [<$chest_name> _data] {
+                    [<$chest_name _data>] {
                         $(
-                            [<$chest_name _ $bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), super::super::Value>,
+                            [<$chest_name _ $bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), Value>,
                         )+
                     }
                     $(
@@ -256,6 +264,8 @@ macro_rules! define_chest {
                         },
                     )*
                 } use {
+                    use $crate::ObjectId;
+                    use $crate::Path;
                     $($use_item)*
                 });
 
@@ -624,7 +634,6 @@ macro_rules! define_chest {
 
 define_chest!(test_chest(main_bucket) {
 } use {
-    use super::Object;
 });
 
 impl<'a> FallibleIterator for ObjectsIterator<'a> {
