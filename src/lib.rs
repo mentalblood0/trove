@@ -5,6 +5,9 @@ use anyhow::{anyhow, Context, Error, Result};
 use fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
 
+pub extern crate dream;
+pub extern crate paste;
+
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
@@ -162,60 +165,6 @@ impl From<Value> for serde_json::Value {
     }
 }
 
-dream::define_index!(trove_database {
-    object_id_and_path_to_value<(ObjectId, Path), super::super::Value>,
-} use {
-    use crate::ObjectId;
-    use crate::Path;
-});
-
-pub struct Chest {
-    pub index: trove_database::Index,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChestConfig {
-    pub index: trove_database::IndexConfig,
-}
-
-impl Chest {
-    pub fn new(config: ChestConfig) -> Result<Self> {
-        Ok(Self {
-            index: trove_database::Index::new(config.index.clone()).with_context(|| {
-                format!("Can not create chest with index config {:?}", config.index)
-            })?,
-        })
-    }
-
-    pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
-    where
-        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
-    {
-        self.index
-            .lock_all_and_write(|index_write_transaction| {
-                f(&mut WriteTransaction {
-                    index_transaction: index_write_transaction,
-                })
-            })
-            .with_context(|| "Can not lock index and initiate write transaction")
-    }
-
-    pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
-    where
-        F: FnMut(ReadTransaction) -> Result<R>,
-    {
-        self.index
-            .lock_all_writes_and_read(|index_read_transaction| {
-                f(ReadTransaction {
-                    index_transaction: index_read_transaction,
-                })
-            })
-            .with_context(|| {
-                "Can not lock all write operations on index and initiate read transaction"
-            })
-    }
-}
-
 struct Digest {
     value: [u8; 16],
 }
@@ -270,323 +219,413 @@ impl Digest {
     }
 }
 
-pub struct ReadTransaction<'a> {
-    pub index_transaction: trove_database::ReadTransaction<'a>,
-}
-
-pub struct WriteTransaction<'a, 'b, 'c> {
-    pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
-}
-
 pub struct ObjectsIterator<'a> {
     data_table_iterator:
         Box<dyn FallibleIterator<Item = ((ObjectId, Path), Value), Error = Error> + 'a>,
     last_entry: Option<((ObjectId, Path), Value)>,
 }
 
-macro_rules! define_read_methods {
-    () => {
-        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
-            Ok(ObjectsIterator {
-                data_table_iterator: self
-                    .index_transaction
-                    .database_transaction
-                    .object_id_and_path_to_value
-                    .iter(Bound::Unbounded, false)
-                    .with_context(|| {
-                        "Can not initiate iteration over object_id_and_path_to_value table"
-                    })?,
-                last_entry: None,
-            })
-        }
-
-        pub fn get_flattened(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<FlatObject> {
-            let mut flat_object: FlatObject = Vec::new();
-            let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
-            let mut iterator = self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(from_object_id_and_path), false)
-                .with_context(|| {
-                    format!(
-                        "Can not initiate iteration over object_id_and_path_to_value table from \
-                         key {from_object_id_and_path:?}"
-                    )
-                })?
-                .take_while(|entry| {
-                    Ok(entry.0 .0 == *object_id
-                        && (path_prefix.is_empty()
-                            || entry.0 .1 == *path_prefix
-                            || entry.0 .1.starts_with(&path_prefix)))
-                });
-            loop {
-                if let Some(entry) = iterator.next()? {
-                    flat_object.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
-                } else {
-                    break;
-                }
+#[macro_export]
+macro_rules! define_chest {
+    ($chest_name:ident($($bucket_name:ident),+ $(,)?) {
+        $(
+            $additional_schema_name:ident {
+                $($table_name:ident<$key_type:ty, $value_type:ty>),+ $(,)?
             }
-            Ok(flat_object)
-        }
+        )*
+    } use {
+        $($use_item:tt)*
+    }) => {
+        #[allow(dead_code)]
+        mod $chest_name {
+            use $crate::dream;
+            use $crate::paste::paste;
 
-        pub fn get(
-            &'a self,
-            object_id: &ObjectId,
-            path_prefix: &Path,
-        ) -> Result<Option<serde_json::Value>> {
-            nest(
-                &self
-                    .get_flattened(object_id, path_prefix)
-                    .with_context(|| {
-                        format!(
-                            "Can not get part at path prefix {path_prefix:?} of flattened object \
-                             with id {object_id:?}"
-                        )
-                    })?,
-            )
-        }
+            paste! {
+                dream::define_index!(trove_database(
+                    $( $bucket_name ),*
+                ) {
+                    [<$chest_name> _data] {
+                        $(
+                            [<$chest_name _ $bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), super::super::Value>,
+                        )+
+                    }
+                    $(
+                        $additional_schema_name {
+                            $( $table_name<$key_type, $value_type> ),*
+                        },
+                    )*
+                } use {
+                    $($use_item)*
+                });
 
-        pub fn select(
-            &'a self,
-            presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-            absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-            start_after_object: Option<ObjectId>,
-        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
-            let present_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in presention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| {
-                                format!(
-                                    "Can not convert json value {value:?} to database storable \
-                                     value so to select objects where ({index_record_type:?}, \
-                                     {path:?}, {value:?}) is present"
-                                )
-                            })?,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "Can not compute digest of presention condition \
-                                 ({index_record_type:?}), {path:?}, {value:?}"
-                            )
-                        })?
-                        .value,
-                    }));
+                pub struct Chest {
+                    pub index: trove_database::Index,
                 }
-                result
-            };
-            let absent_ids = {
-                let mut result = Vec::new();
-                for (index_record_type, path, value) in absention_conditions {
-                    result.push(dream::Object::Identified(dream::Id {
-                        value: Digest::of_pathvalue(
-                            index_record_type.clone(),
-                            &path,
-                            &value.clone().try_into().with_context(|| {
-                                format!(
-                                    "Can not convert json value {value:?} to database storable \
-                                     value so to select objects where ({index_record_type:?}, \
-                                     {path:?}, {value:?}) is absent"
-                                )
-                            })?,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "Can not compute digest of absention condition \
-                                 ({index_record_type:?}), {path:?}, {value:?}"
-                            )
-                        })?
-                        .value,
-                    }));
+
+                #[derive(Debug, Clone, Serialize, Deserialize)]
+                pub struct ChestConfig {
+                    pub index: trove_database::IndexConfig,
                 }
-                result
-            };
-            Ok(Box::new(
-                self.index_transaction
-                    .search(
-                        &present_ids,
-                        &absent_ids,
-                        start_after_object.and_then(|start_after_object| {
-                            Some(dream::Id {
-                                value: start_after_object.value,
+
+                impl Chest {
+                    pub fn new(config: ChestConfig) -> Result<Self> {
+                        Ok(Self {
+                            index: trove_database::Index::new(config.index.clone()).with_context(|| {
+                                format!("Can not create chest with index config {:?}", config.index)
+                            })?,
+                        })
+                    }
+
+                    pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
+                    where
+                        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
+                    {
+                        self.index
+                            .lock_all_and_write(|index_write_transaction| {
+                                f(&mut WriteTransaction {
+                                    index_transaction: index_write_transaction,
+                                })
                             })
-                        }),
-                    )
-                    .with_context(|| {
-                        format!(
-                            "Can not initiate search in index with presention conditions \
-                             {presention_conditions:?} and absention conditions \
-                             {absention_conditions:?}"
-                        )
-                    })?
-                    .map(|dream_id| {
-                        Ok(ObjectId {
-                            value: dream_id.value,
-                        })
-                    }),
-            ))
-        }
+                            .with_context(|| "Can not lock index and initiate write transaction")
+                    }
 
-        pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
-            let iter_from = Bound::Included(&(
-                object_id.clone(),
-                array_path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
-                    .collect::<Path>(),
-            ));
-            let mut found_object = false;
-            Ok(self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(iter_from, true)?
-                .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id
-                        && current_path.starts_with(&array_path)
-                        && if let Some(PathSegment::JsonArrayIndex(_)) =
-                            current_path.get(array_path.len())
-                        {
-                            true
-                        } else {
-                            false
-                        })
-                })
-                .map(|((_, result_path), _)| {
-                    found_object = true;
-                    Ok(match result_path.get(array_path.len()).ok_or_else(|| {
-                        anyhow!("Can not get last element of result path {result_path:?}")
-                    })? {
-                        PathSegment::JsonObjectKey(object_key) => {
-                            return Err(anyhow!(
-                                "Last element of result path appear to be JSON object string key \
-                                 {object_key}, but expected JSON array index number"
+                    pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
+                    where
+                        F: FnMut(ReadTransaction) -> Result<R>,
+                    {
+                        self.index
+                            .lock_all_writes_and_read(|index_read_transaction| {
+                                f(ReadTransaction {
+                                    index_transaction: index_read_transaction,
+                                })
+                            })
+                            .with_context(|| {
+                                "Can not lock all write operations on index and initiate read transaction"
+                            })
+                    }
+                }
+
+                pub struct ReadTransaction<'a> {
+                    pub index_transaction: trove_database::ReadTransaction<'a>,
+                }
+
+                pub struct WriteTransaction<'a, 'b, 'c> {
+                    pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
+                }
+
+                macro_rules! define_read_methods {
+                    () => {
+                        pub fn objects(&'a self) -> Result<ObjectsIterator<'a>> {
+                            Ok(ObjectsIterator {
+                                data_table_iterator: self
+                                    .index_transaction
+                                    .database_transaction
+                                    .object_id_and_path_to_value
+                                    .iter(Bound::Unbounded, false)
+                                    .with_context(|| {
+                                        "Can not initiate iteration over object_id_and_path_to_value table"
+                                    })?,
+                                last_entry: None,
+                            })
+                        }
+
+                        pub fn get_flattened(
+                            &'a self,
+                            object_id: &ObjectId,
+                            path_prefix: &Path,
+                        ) -> Result<FlatObject> {
+                            let mut flat_object: FlatObject = Vec::new();
+                            let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
+                            let mut iterator = self
+                                .index_transaction
+                                .database_transaction
+                                .object_id_and_path_to_value
+                                .iter(Bound::Included(from_object_id_and_path), false)
+                                .with_context(|| {
+                                    format!(
+                                        "Can not initiate iteration over object_id_and_path_to_value table from \
+                                         key {from_object_id_and_path:?}"
+                                    )
+                                })?
+                                .take_while(|entry| {
+                                    Ok(entry.0 .0 == *object_id
+                                        && (path_prefix.is_empty()
+                                            || entry.0 .1 == *path_prefix
+                                            || entry.0 .1.starts_with(&path_prefix)))
+                                });
+                            loop {
+                                if let Some(entry) = iterator.next()? {
+                                    flat_object.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
+                                } else {
+                                    break;
+                                }
+                            }
+                            Ok(flat_object)
+                        }
+
+                        pub fn get(
+                            &'a self,
+                            object_id: &ObjectId,
+                            path_prefix: &Path,
+                        ) -> Result<Option<serde_json::Value>> {
+                            nest(
+                                &self
+                                    .get_flattened(object_id, path_prefix)
+                                    .with_context(|| {
+                                        format!(
+                                            "Can not get part at path prefix {path_prefix:?} of flattened object \
+                                             with id {object_id:?}"
+                                        )
+                                    })?,
+                            )
+                        }
+
+                        pub fn select(
+                            &'a self,
+                            presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+                            absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+                            start_after_object: Option<ObjectId>,
+                        ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+                            let present_ids = {
+                                let mut result = Vec::new();
+                                for (index_record_type, path, value) in presention_conditions {
+                                    result.push(dream::Object::Identified(dream::Id {
+                                        value: Digest::of_pathvalue(
+                                            index_record_type.clone(),
+                                            &path,
+                                            &value.clone().try_into().with_context(|| {
+                                                format!(
+                                                    "Can not convert json value {value:?} to database storable \
+                                                     value so to select objects where ({index_record_type:?}, \
+                                                     {path:?}, {value:?}) is present"
+                                                )
+                                            })?,
+                                        )
+                                        .with_context(|| {
+                                            format!(
+                                                "Can not compute digest of presention condition \
+                                                 ({index_record_type:?}), {path:?}, {value:?}"
+                                            )
+                                        })?
+                                        .value,
+                                    }));
+                                }
+                                result
+                            };
+                            let absent_ids = {
+                                let mut result = Vec::new();
+                                for (index_record_type, path, value) in absention_conditions {
+                                    result.push(dream::Object::Identified(dream::Id {
+                                        value: Digest::of_pathvalue(
+                                            index_record_type.clone(),
+                                            &path,
+                                            &value.clone().try_into().with_context(|| {
+                                                format!(
+                                                    "Can not convert json value {value:?} to database storable \
+                                                     value so to select objects where ({index_record_type:?}, \
+                                                     {path:?}, {value:?}) is absent"
+                                                )
+                                            })?,
+                                        )
+                                        .with_context(|| {
+                                            format!(
+                                                "Can not compute digest of absention condition \
+                                                 ({index_record_type:?}), {path:?}, {value:?}"
+                                            )
+                                        })?
+                                        .value,
+                                    }));
+                                }
+                                result
+                            };
+                            Ok(Box::new(
+                                self.index_transaction
+                                    .search(
+                                        &present_ids,
+                                        &absent_ids,
+                                        start_after_object.and_then(|start_after_object| {
+                                            Some(dream::Id {
+                                                value: start_after_object.value,
+                                            })
+                                        }),
+                                    )
+                                    .with_context(|| {
+                                        format!(
+                                            "Can not initiate search in index with presention conditions \
+                                             {presention_conditions:?} and absention conditions \
+                                             {absention_conditions:?}"
+                                        )
+                                    })?
+                                    .map(|dream_id| {
+                                        Ok(ObjectId {
+                                            value: dream_id.value,
+                                        })
+                                    }),
                             ))
                         }
-                        PathSegment::JsonArrayIndex(array_index) => *array_index,
-                    } + 1)
-                })
-                .next()?
-                .or_else(|| if found_object { None } else { Some(0) }))
-        }
 
-        pub fn last(
-            &self,
-            object_id: &ObjectId,
-            array_path: &Path,
-        ) -> Result<Option<serde_json::Value>> {
-            if let Some(array_len) = self.len(object_id, array_path)? {
-                let result_path = array_path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
-                    .collect::<Vec<_>>();
-                Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
-                    || anyhow!("Can not get last element of array at path {result_path:?}"),
-                )?))
-            } else {
-                Ok(None)
+                        pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
+                            let iter_from = Bound::Included(&(
+                                object_id.clone(),
+                                array_path
+                                    .iter()
+                                    .cloned()
+                                    .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
+                                    .collect::<Path>(),
+                            ));
+                            let mut found_object = false;
+                            Ok(self
+                                .index_transaction
+                                .database_transaction
+                                .object_id_and_path_to_value
+                                .iter(iter_from, true)?
+                                .take_while(|((current_object_id, current_path), _)| {
+                                    Ok(current_object_id == object_id
+                                        && current_path.starts_with(&array_path)
+                                        && if let Some(PathSegment::JsonArrayIndex(_)) =
+                                            current_path.get(array_path.len())
+                                        {
+                                            true
+                                        } else {
+                                            false
+                                        })
+                                })
+                                .map(|((_, result_path), _)| {
+                                    found_object = true;
+                                    Ok(match result_path.get(array_path.len()).ok_or_else(|| {
+                                        anyhow!("Can not get last element of result path {result_path:?}")
+                                    })? {
+                                        PathSegment::JsonObjectKey(object_key) => {
+                                            return Err(anyhow!(
+                                                "Last element of result path appear to be JSON object string key \
+                                                 {object_key}, but expected JSON array index number"
+                                            ))
+                                        }
+                                        PathSegment::JsonArrayIndex(array_index) => *array_index,
+                                    } + 1)
+                                })
+                                .next()?
+                                .or_else(|| if found_object { None } else { Some(0) }))
+                        }
+
+                        pub fn last(
+                            &self,
+                            object_id: &ObjectId,
+                            array_path: &Path,
+                        ) -> Result<Option<serde_json::Value>> {
+                            if let Some(array_len) = self.len(object_id, array_path)? {
+                                let result_path = array_path
+                                    .iter()
+                                    .cloned()
+                                    .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
+                                    .collect::<Vec<_>>();
+                                Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
+                                    || anyhow!("Can not get last element of array at path {result_path:?}"),
+                                )?))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+
+                        pub fn contains_object_with_id(&self, object_id: &ObjectId) -> Result<bool> {
+                            Ok(self
+                                .index_transaction
+                                .database_transaction
+                                .object_id_and_path_to_value
+                                .iter(Bound::Included(&(object_id.clone(), vec![])), false)?
+                                .take_while(|((current_object_id, _), _)| Ok(current_object_id == object_id))
+                                .next()?
+                                .is_some())
+                        }
+
+                        pub fn contains_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
+                            Ok(self
+                                .index_transaction
+                                .database_transaction
+                                .object_id_and_path_to_value
+                                .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
+                                .take_while(|((current_object_id, current_path), _)| {
+                                    Ok(current_object_id == object_id && current_path.starts_with(path))
+                                })
+                                .next()?
+                                .is_some())
+                        }
+
+                        pub fn contains_exact_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
+                            Ok(self
+                                .index_transaction
+                                .database_transaction
+                                .object_id_and_path_to_value
+                                .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
+                                .take_while(|((current_object_id, current_path), _)| {
+                                    Ok(current_object_id == object_id && current_path == path)
+                                })
+                                .next()?
+                                .is_some())
+                        }
+
+                        pub fn contains_element(
+                            &self,
+                            object_id: &ObjectId,
+                            array_path: &Path,
+                            element: &Value,
+                        ) -> Result<bool> {
+                            self.index_transaction
+                                .has_object_with_tag(&dream::Object::Identified(dream::Id {
+                                    value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                                        .with_context(|| {
+                                            format!(
+                                                "Can not compute array type digest for path {array_path:?}, \
+                                                 object id {:?} and value {element:?}",
+                                                object_id
+                                            )
+                                        })?
+                                        .value,
+                                }))
+                        }
+
+                        pub fn get_element_index(
+                            &self,
+                            object_id: &ObjectId,
+                            array_path: &Path,
+                            element: &Value,
+                        ) -> Result<Option<u32>> {
+                            Ok(self
+                                .index_transaction
+                                .search(
+                                    &vec![dream::Object::Identified(dream::Id {
+                                        value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                                            .with_context(|| {
+                                                format!(
+                                                    "Can not compute array type digest for path {array_path:?}, \
+                                                     object id {:?} and value {element:?}",
+                                                    object_id
+                                                )
+                                            })?
+                                            .value,
+                                    })],
+                                    &vec![],
+                                    None,
+                                )?
+                                .next()?
+                                .map(|dream_id| IndexBatch::dream_id_to_u32(dream_id)))
+                        }
+                    };
+                }
+
+                impl<'a> ReadTransaction<'a> {
+                    define_read_methods!();
+                }
             }
-        }
-
-        pub fn contains_object_with_id(&self, object_id: &ObjectId) -> Result<bool> {
-            Ok(self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(&(object_id.clone(), vec![])), false)?
-                .take_while(|((current_object_id, _), _)| Ok(current_object_id == object_id))
-                .next()?
-                .is_some())
-        }
-
-        pub fn contains_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
-            Ok(self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
-                .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path.starts_with(path))
-                })
-                .next()?
-                .is_some())
-        }
-
-        pub fn contains_exact_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
-            Ok(self
-                .index_transaction
-                .database_transaction
-                .object_id_and_path_to_value
-                .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
-                .take_while(|((current_object_id, current_path), _)| {
-                    Ok(current_object_id == object_id && current_path == path)
-                })
-                .next()?
-                .is_some())
-        }
-
-        pub fn contains_element(
-            &self,
-            object_id: &ObjectId,
-            array_path: &Path,
-            element: &Value,
-        ) -> Result<bool> {
-            self.index_transaction
-                .has_object_with_tag(&dream::Object::Identified(dream::Id {
-                    value: Digest::of_path_object_id_and_value(array_path, object_id, element)
-                        .with_context(|| {
-                            format!(
-                                "Can not compute array type digest for path {array_path:?}, \
-                                 object id {:?} and value {element:?}",
-                                object_id
-                            )
-                        })?
-                        .value,
-                }))
-        }
-
-        pub fn get_element_index(
-            &self,
-            object_id: &ObjectId,
-            array_path: &Path,
-            element: &Value,
-        ) -> Result<Option<u32>> {
-            Ok(self
-                .index_transaction
-                .search(
-                    &vec![dream::Object::Identified(dream::Id {
-                        value: Digest::of_path_object_id_and_value(array_path, object_id, element)
-                            .with_context(|| {
-                                format!(
-                                    "Can not compute array type digest for path {array_path:?}, \
-                                     object id {:?} and value {element:?}",
-                                    object_id
-                                )
-                            })?
-                            .value,
-                    })],
-                    &vec![],
-                    None,
-                )?
-                .next()?
-                .map(|dream_id| IndexBatch::dream_id_to_u32(dream_id)))
         }
     };
 }
 
-impl<'a> ReadTransaction<'a> {
-    define_read_methods!();
-}
+define_chest!(test_chest(main_bucket) {
+} use {
+    use super::Object;
+});
 
 impl<'a> FallibleIterator for ObjectsIterator<'a> {
     type Item = Object;
