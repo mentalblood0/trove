@@ -229,10 +229,16 @@ pub struct ObjectsIterator<'a> {
 
 #[macro_export]
 macro_rules! define_chest {
-    ($chest_name:ident($($bucket_name:ident),+ $(,)?) {
+    ($chest_name:ident(
+        $(
+            $bucket_name:ident
+        )*
+    ) {
         $(
             $additional_schema_name:ident {
-                $($table_name:ident<$key_type:ty, $value_type:ty>),+ $(,)?
+                $(
+                    $table_name:ident<$key_type:ty, $value_type:ty>
+                )*
             }
         )*
     } use {
@@ -243,11 +249,9 @@ macro_rules! define_chest {
             use $crate::{
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
-                dream, paste::paste
+                dream, paste::paste, FallibleIterator,
+                ObjectId, Path, Value
             };
-
-            use $crate::ObjectId;
-            use $crate::Path;
 
             paste! {
                 dream::define_index!(trove_database(
@@ -255,17 +259,18 @@ macro_rules! define_chest {
                 ) {
                     [<$chest_name _data>] {
                         $(
-                            [<$chest_name _ $bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), Value>,
+                            [<$chest_name _ $bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), JsonValue>
                         )+
                     }
                     $(
                         $additional_schema_name {
-                            $( $table_name<$key_type, $value_type> ),*
-                        },
+                            $( $table_name<$key_type, $value_type> )*
+                        }
                     )*
                 } use {
                     use $crate::ObjectId;
                     use $crate::Path;
+                    use $crate::Value as JsonValue;
                     $($use_item)*
                 });
 
@@ -632,7 +637,9 @@ macro_rules! define_chest {
     };
 }
 
-define_chest!(test_chest(main_bucket) {
+define_chest!(test_chest(
+    main_bucket
+) {
 } use {
 });
 
