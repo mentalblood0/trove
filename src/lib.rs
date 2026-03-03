@@ -241,7 +241,7 @@ macro_rules! define_chest {
         $($use_item:tt)*
     }) => {
         #[allow(dead_code)]
-        mod $chest_name {
+        pub mod $chest_name {
             use std::{ops::Bound, collections::HashMap};
 
             use $crate::{
