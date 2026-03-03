@@ -608,7 +608,7 @@ macro_rules! define_chest {
                                     ))
                                 }
 
-                                pub fn len(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
+                                pub fn last_element_index(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
                                     let iter_from = Bound::Included(&(
                                         object_id.clone(),
                                         array_path
@@ -658,11 +658,11 @@ macro_rules! define_chest {
                                     object_id: &ObjectId,
                                     array_path: &Path,
                                 ) -> Result<Option<serde_json::Value>> {
-                                    if let Some(array_len) = self.len(object_id, array_path)? {
+                                    if let Some(last_element_index) = self.last_element_index(object_id, array_path)? {
                                         let result_path = array_path
                                             .iter()
                                             .cloned()
-                                            .chain(vec![PathSegment::JsonArrayIndex(array_len - 1)].into_iter())
+                                            .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
                                             .collect::<Vec<_>>();
                                         Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
                                             || anyhow!("Can not get last element of array at path {result_path:?}"),
@@ -885,16 +885,16 @@ macro_rules! define_chest {
                             array_path: &Path,
                             value: serde_json::Value,
                         ) -> Result<u32> {
-                            let array_len = self
-                                .len(object_id, array_path)?
+                            let last_element_index= self
+                                .last_element_index(object_id, array_path)?
                                 .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
                             let push_path = array_path
                                 .iter()
                                 .cloned()
-                                .chain(vec![PathSegment::JsonArrayIndex(array_len)].into_iter())
+                                .chain(vec![PathSegment::JsonArrayIndex(last_element_index)].into_iter())
                                 .collect::<Vec<_>>();
                             self.[<$bucket_name _update>](object_id.clone(), push_path, value)?;
-                            Ok(array_len)
+                            Ok(last_element_index)
                         }
                     }
                 )*
@@ -1223,7 +1223,9 @@ mod tests {
                                                     false
                                                 );
                                                 assert_eq!(
-                                                    transaction.len(object_id, &base_path).unwrap(),
+                                                    transaction
+                                                        .last_element_index(object_id, &base_path)
+                                                        .unwrap(),
                                                     Some(0)
                                                 );
                                                 let selected = transaction
@@ -1317,7 +1319,9 @@ mod tests {
                                                         .unwrap();
                                                     assert_eq!(
                                                         transaction
-                                                            .len(object_id, &base_path)
+                                                            .last_element_index(
+                                                                object_id, &base_path
+                                                            )
                                                             .unwrap(),
                                                         Some(*current_array_index + 1),
                                                     );
