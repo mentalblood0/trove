@@ -219,9 +219,9 @@ impl Digest {
 }
 
 pub struct DocumentsIterator<'a> {
-    data_table_iterator:
+    pub data_table_iterator:
         Box<dyn FallibleIterator<Item = ((DocumentId, Path), Value), Error = Error> + 'a>,
-    last_entry: Option<((DocumentId, Path), Value)>,
+    pub last_entry: Option<((DocumentId, Path), Value)>,
 }
 
 #[macro_export]
