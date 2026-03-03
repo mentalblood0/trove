@@ -272,63 +272,65 @@ macro_rules! define_chest {
                     use $crate::Value as JsonValue;
                     $($use_item)*
                 });
+            }
 
-                pub struct Chest {
-                    pub index: trove_database::Index,
+            pub struct Chest {
+                pub index: trove_database::Index,
+            }
+
+            #[derive(Debug, Clone, Serialize, Deserialize)]
+            pub struct ChestConfig {
+                pub index: trove_database::IndexConfig,
+            }
+
+            impl Chest {
+                pub fn new(config: ChestConfig) -> Result<Self> {
+                    Ok(Self {
+                        index: trove_database::Index::new(config.index.clone()).with_context(|| {
+                            format!("Can not create chest with index config {:?}", config.index)
+                        })?,
+                    })
                 }
 
-                #[derive(Debug, Clone, Serialize, Deserialize)]
-                pub struct ChestConfig {
-                    pub index: trove_database::IndexConfig,
-                }
-
-                impl Chest {
-                    pub fn new(config: ChestConfig) -> Result<Self> {
-                        Ok(Self {
-                            index: trove_database::Index::new(config.index.clone()).with_context(|| {
-                                format!("Can not create chest with index config {:?}", config.index)
-                            })?,
+                pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
+                where
+                    F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
+                {
+                    self.index
+                        .lock_all_and_write(|index_write_transaction| {
+                            f(&mut WriteTransaction {
+                                index_transaction: index_write_transaction,
+                            })
                         })
-                    }
-
-                    pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
-                    where
-                        F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
-                    {
-                        self.index
-                            .lock_all_and_write(|index_write_transaction| {
-                                f(&mut WriteTransaction {
-                                    index_transaction: index_write_transaction,
-                                })
-                            })
-                            .with_context(|| "Can not lock index and initiate write transaction")
-                    }
-
-                    pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
-                    where
-                        F: FnMut(ReadTransaction) -> Result<R>,
-                    {
-                        self.index
-                            .lock_all_writes_and_read(|index_read_transaction| {
-                                f(ReadTransaction {
-                                    index_transaction: index_read_transaction,
-                                })
-                            })
-                            .with_context(|| {
-                                "Can not lock all write operations on index and initiate read transaction"
-                            })
-                    }
+                        .with_context(|| "Can not lock index and initiate write transaction")
                 }
 
-                pub struct ReadTransaction<'a> {
-                    pub index_transaction: trove_database::ReadTransaction<'a>,
+                pub fn lock_all_writes_and_read<F, R>(&self, mut f: F) -> Result<R>
+                where
+                    F: FnMut(ReadTransaction) -> Result<R>,
+                {
+                    self.index
+                        .lock_all_writes_and_read(|index_read_transaction| {
+                            f(ReadTransaction {
+                                index_transaction: index_read_transaction,
+                            })
+                        })
+                        .with_context(|| {
+                            "Can not lock all write operations on index and initiate read transaction"
+                        })
                 }
+            }
 
-                pub struct WriteTransaction<'a, 'b, 'c> {
-                    pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
-                }
+            pub struct ReadTransaction<'a> {
+                pub index_transaction: trove_database::ReadTransaction<'a>,
+            }
 
-                $(
+            pub struct WriteTransaction<'a, 'b, 'c> {
+                pub index_transaction: &'a mut trove_database::WriteTransaction<'b, 'c>,
+            }
+
+            $(
+                paste! {
                     #[derive(Debug, Clone)]
                     struct [<$bucket_name:camel IndexBatch>] {
                         document_id: DocumentId,
@@ -452,275 +454,298 @@ macro_rules! define_chest {
                             Ok(self)
                         }
                     }
-                )*
+                }
+            )*
 
-                macro_rules! define_read_methods {
-                    () => {
-                        $(
-                            paste! {
-                                pub fn [<$bucket_name _documents>](&'a self) -> Result<DocumentsIterator<'a>> {
-                                    Ok(DocumentsIterator {
-                                        data_table_iterator: self
-                                            .index_transaction
-                                            .database_transaction
-                                            .data
-                                            .[<$bucket_name _document_id_and_path_to_value>]
-                                            .iter(Bound::Unbounded, false)
-                                            .with_context(|| {
-                                                "Can not initiate iteration over document_id_and_path_to_value table"
-                                            })?,
-                                        last_entry: None,
-                                    })
-                                }
-
-                                pub fn [<$bucket_name _get_flattened>](
-                                    &'a self,
-                                    document_id: &DocumentId,
-                                    path_prefix: &Path,
-                                ) -> Result<FlatDocument> {
-                                    let mut flat_document: FlatDocument = Vec::new();
-                                    let from_document_id_and_path = &(document_id.clone(), path_prefix.clone());
-                                    let mut iterator = self
+            macro_rules! define_read_methods {
+                () => {
+                    $(
+                        paste! {
+                            pub fn [<$bucket_name _documents>](&'a self) -> Result<DocumentsIterator<'a>> {
+                                Ok(DocumentsIterator {
+                                    data_table_iterator: self
                                         .index_transaction
                                         .database_transaction
                                         .data
                                         .[<$bucket_name _document_id_and_path_to_value>]
-                                        .iter(Bound::Included(from_document_id_and_path), false)
+                                        .iter(Bound::Unbounded, false)
+                                        .with_context(|| {
+                                            "Can not initiate iteration over document_id_and_path_to_value table"
+                                        })?,
+                                    last_entry: None,
+                                })
+                            }
+
+                            pub fn [<$bucket_name _get_flattened>](
+                                &'a self,
+                                document_id: &DocumentId,
+                                path_prefix: &Path,
+                            ) -> Result<FlatDocument> {
+                                let mut flat_document: FlatDocument = Vec::new();
+                                let from_document_id_and_path = &(document_id.clone(), path_prefix.clone());
+                                let mut iterator = self
+                                    .index_transaction
+                                    .database_transaction
+                                    .data
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .iter(Bound::Included(from_document_id_and_path), false)
+                                    .with_context(|| {
+                                        format!(
+                                            "Can not initiate iteration over document_id_and_path_to_value table from \
+                                             key {from_document_id_and_path:?}"
+                                        )
+                                    })?
+                                    .take_while(|entry| {
+                                        Ok(entry.0 .0 == *document_id
+                                            && (path_prefix.is_empty()
+                                                || entry.0 .1 == *path_prefix
+                                                || entry.0 .1.starts_with(&path_prefix)))
+                                    });
+                                loop {
+                                    if let Some(entry) = iterator.next()? {
+                                        flat_document.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                Ok(flat_document)
+                            }
+
+                            pub fn [<$bucket_name _get>](
+                                &'a self,
+                                document_id: &DocumentId,
+                                path_prefix: &Path,
+                            ) -> Result<Option<serde_json::Value>> {
+                                nest(
+                                    &self
+                                        .[<$bucket_name _get_flattened>](document_id, path_prefix)
                                         .with_context(|| {
                                             format!(
-                                                "Can not initiate iteration over document_id_and_path_to_value table from \
-                                                 key {from_document_id_and_path:?}"
+                                                "Can not get part at path prefix {path_prefix:?} of flattened document \
+                                                 with id {document_id:?}"
                                             )
-                                        })?
-                                        .take_while(|entry| {
-                                            Ok(entry.0 .0 == *document_id
-                                                && (path_prefix.is_empty()
-                                                    || entry.0 .1 == *path_prefix
-                                                    || entry.0 .1.starts_with(&path_prefix)))
-                                        });
-                                    loop {
-                                        if let Some(entry) = iterator.next()? {
-                                            flat_document.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    Ok(flat_document)
-                                }
+                                        })?,
+                                )
+                            }
 
-                                pub fn [<$bucket_name _get>](
-                                    &'a self,
-                                    document_id: &DocumentId,
-                                    path_prefix: &Path,
-                                ) -> Result<Option<serde_json::Value>> {
-                                    nest(
-                                        &self
-                                            .[<$bucket_name _get_flattened>](document_id, path_prefix)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not get part at path prefix {path_prefix:?} of flattened document \
-                                                     with id {document_id:?}"
-                                                )
-                                            })?,
-                                    )
-                                }
-
-                                pub fn [<$bucket_name _select>](
-                                    &'a self,
-                                    presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-                                    absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-                                    start_after_document: Option<DocumentId>,
-                                ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
-                                    let present_ids = {
-                                        let mut result = Vec::new();
-                                        for (index_record_type, path, value) in presention_conditions {
-                                            result.push(dream::Object::Identified(dream::Id {
-                                                value: Digest::of_pathvalue(
-                                                    index_record_type.clone(),
-                                                    &path,
-                                                    &value.clone().try_into().with_context(|| {
-                                                        format!(
-                                                            "Can not convert json value {value:?} to database storable \
-                                                             value so to select documents where ({index_record_type:?}, \
-                                                             {path:?}, {value:?}) is present"
-                                                        )
-                                                    })?,
-                                                )
-                                                .with_context(|| {
+                            pub fn [<$bucket_name _select>](
+                                &'a self,
+                                presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+                                absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+                                start_after_document: Option<DocumentId>,
+                            ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
+                                let present_ids = {
+                                    let mut result = Vec::new();
+                                    for (index_record_type, path, value) in presention_conditions {
+                                        result.push(dream::Object::Identified(dream::Id {
+                                            value: Digest::of_pathvalue(
+                                                index_record_type.clone(),
+                                                &path,
+                                                &value.clone().try_into().with_context(|| {
                                                     format!(
-                                                        "Can not compute digest of presention condition \
-                                                         ({index_record_type:?}), {path:?}, {value:?}"
+                                                        "Can not convert json value {value:?} to database storable \
+                                                         value so to select documents where ({index_record_type:?}, \
+                                                         {path:?}, {value:?}) is present"
                                                     )
-                                                })?
-                                                .value,
-                                            }));
-                                        }
-                                        result
-                                    };
-                                    let absent_ids = {
-                                        let mut result = Vec::new();
-                                        for (index_record_type, path, value) in absention_conditions {
-                                            result.push(dream::Object::Identified(dream::Id {
-                                                value: Digest::of_pathvalue(
-                                                    index_record_type.clone(),
-                                                    &path,
-                                                    &value.clone().try_into().with_context(|| {
-                                                        format!(
-                                                            "Can not convert json value {value:?} to database storable \
-                                                             value so to select documents where ({index_record_type:?}, \
-                                                             {path:?}, {value:?}) is absent"
-                                                        )
-                                                    })?,
-                                                )
-                                                .with_context(|| {
-                                                    format!(
-                                                        "Can not compute digest of absention condition \
-                                                         ({index_record_type:?}), {path:?}, {value:?}"
-                                                    )
-                                                })?
-                                                .value,
-                                            }));
-                                        }
-                                        result
-                                    };
-                                    Ok(Box::new(
-                                        self.index_transaction
-                                            .[<$bucket_name _search>](
-                                                &present_ids,
-                                                &absent_ids,
-                                                start_after_document.and_then(|start_after_document| {
-                                                    Some(dream::Id {
-                                                        value: start_after_document.value,
-                                                    })
-                                                }),
+                                                })?,
                                             )
                                             .with_context(|| {
                                                 format!(
-                                                    "Can not initiate search in index with presention conditions \
-                                                     {presention_conditions:?} and absention conditions \
-                                                     {absention_conditions:?}"
+                                                    "Can not compute digest of presention condition \
+                                                     ({index_record_type:?}), {path:?}, {value:?}"
                                                 )
                                             })?
-                                            .map(|dream_id| {
-                                                Ok(DocumentId {
-                                                    value: dream_id.value,
+                                            .value,
+                                        }));
+                                    }
+                                    result
+                                };
+                                let absent_ids = {
+                                    let mut result = Vec::new();
+                                    for (index_record_type, path, value) in absention_conditions {
+                                        result.push(dream::Object::Identified(dream::Id {
+                                            value: Digest::of_pathvalue(
+                                                index_record_type.clone(),
+                                                &path,
+                                                &value.clone().try_into().with_context(|| {
+                                                    format!(
+                                                        "Can not convert json value {value:?} to database storable \
+                                                         value so to select documents where ({index_record_type:?}, \
+                                                         {path:?}, {value:?}) is absent"
+                                                    )
+                                                })?,
+                                            )
+                                            .with_context(|| {
+                                                format!(
+                                                    "Can not compute digest of absention condition \
+                                                     ({index_record_type:?}), {path:?}, {value:?}"
+                                                )
+                                            })?
+                                            .value,
+                                        }));
+                                    }
+                                    result
+                                };
+                                Ok(Box::new(
+                                    self.index_transaction
+                                        .[<$bucket_name _search>](
+                                            &present_ids,
+                                            &absent_ids,
+                                            start_after_document.and_then(|start_after_document| {
+                                                Some(dream::Id {
+                                                    value: start_after_document.value,
                                                 })
                                             }),
-                                    ))
-                                }
+                                        )
+                                        .with_context(|| {
+                                            format!(
+                                                "Can not initiate search in index with presention conditions \
+                                                 {presention_conditions:?} and absention conditions \
+                                                 {absention_conditions:?}"
+                                            )
+                                        })?
+                                        .map(|dream_id| {
+                                            Ok(DocumentId {
+                                                value: dream_id.value,
+                                            })
+                                        }),
+                                ))
+                            }
 
-                                pub fn [<$bucket_name _last_element_index>](&self, document_id: &DocumentId, array_path: &Path) -> Result<Option<u32>> {
-                                    let iter_from = Bound::Included(&(
-                                        document_id.clone(),
-                                        array_path
-                                            .iter()
-                                            .cloned()
-                                            .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
-                                            .collect::<Path>(),
-                                    ));
-                                    let mut found_document = false;
-                                    Ok(self
-                                        .index_transaction
-                                        .database_transaction
-                                        .data
-                                        .[<$bucket_name _document_id_and_path_to_value>]
-                                        .iter(iter_from, true)?
-                                        .take_while(|((current_document_id, current_path), _)| {
-                                            Ok(current_document_id == document_id
-                                                && current_path.starts_with(&array_path)
-                                                && if let Some(PathSegment::JsonArrayIndex(_)) =
-                                                    current_path.get(array_path.len())
-                                                {
-                                                    true
-                                                } else {
-                                                    false
-                                                })
-                                        })
-                                        .map(|((_, result_path), _)| {
-                                            found_document = true;
-                                            Ok(match result_path.get(array_path.len()).ok_or_else(|| {
-                                                anyhow!("Can not get last element of result path {result_path:?}")
-                                            })? {
-                                                PathSegment::JsonObjectKey(object_key) => {
-                                                    return Err(anyhow!(
-                                                        "Last element of result path appear to be JSON object string key \
-                                                         {object_key}, but expected JSON array index number"
-                                                    ))
-                                                }
-                                                PathSegment::JsonArrayIndex(array_index) => *array_index,
-                                            } + 1)
-                                        })
-                                        .next()?
-                                        .or_else(|| if found_document { None } else { Some(0) }))
-                                }
+                            pub fn [<$bucket_name _last_element_index>](&self, document_id: &DocumentId, array_path: &Path) -> Result<Option<u32>> {
+                                let iter_from = Bound::Included(&(
+                                    document_id.clone(),
+                                    array_path
+                                        .iter()
+                                        .cloned()
+                                        .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
+                                        .collect::<Path>(),
+                                ));
+                                let mut found_document = false;
+                                Ok(self
+                                    .index_transaction
+                                    .database_transaction
+                                    .data
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .iter(iter_from, true)?
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id
+                                            && current_path.starts_with(&array_path)
+                                            && if let Some(PathSegment::JsonArrayIndex(_)) =
+                                                current_path.get(array_path.len())
+                                            {
+                                                true
+                                            } else {
+                                                false
+                                            })
+                                    })
+                                    .map(|((_, result_path), _)| {
+                                        found_document = true;
+                                        Ok(match result_path.get(array_path.len()).ok_or_else(|| {
+                                            anyhow!("Can not get last element of result path {result_path:?}")
+                                        })? {
+                                            PathSegment::JsonObjectKey(object_key) => {
+                                                return Err(anyhow!(
+                                                    "Last element of result path appear to be JSON object string key \
+                                                     {object_key}, but expected JSON array index number"
+                                                ))
+                                            }
+                                            PathSegment::JsonArrayIndex(array_index) => *array_index,
+                                        } + 1)
+                                    })
+                                    .next()?
+                                    .or_else(|| if found_document { None } else { Some(0) }))
+                            }
 
-                                pub fn [<$bucket_name _last>](
-                                    &self,
-                                    document_id: &DocumentId,
-                                    array_path: &Path,
-                                ) -> Result<Option<serde_json::Value>> {
-                                    if let Some(last_element_index) = self.[<$bucket_name _last_element_index>](document_id, array_path)? {
-                                        let result_path = array_path
-                                            .iter()
-                                            .cloned()
-                                            .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
-                                            .collect::<Vec<_>>();
-                                        Ok(Some(self.[<$bucket_name _get>](document_id, &result_path)?.ok_or_else(
-                                            || anyhow!("Can not get last element of array at path {result_path:?}"),
-                                        )?))
-                                    } else {
-                                        Ok(None)
-                                    }
+                            pub fn [<$bucket_name _last>](
+                                &self,
+                                document_id: &DocumentId,
+                                array_path: &Path,
+                            ) -> Result<Option<serde_json::Value>> {
+                                if let Some(last_element_index) = self.[<$bucket_name _last_element_index>](document_id, array_path)? {
+                                    let result_path = array_path
+                                        .iter()
+                                        .cloned()
+                                        .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
+                                        .collect::<Vec<_>>();
+                                    Ok(Some(self.[<$bucket_name _get>](document_id, &result_path)?.ok_or_else(
+                                        || anyhow!("Can not get last element of array at path {result_path:?}"),
+                                    )?))
+                                } else {
+                                    Ok(None)
                                 }
+                            }
 
-                                pub fn [<$bucket_name _contains_document_with_id>](&self, document_id: &DocumentId) -> Result<bool> {
-                                    Ok(self
-                                        .index_transaction
-                                        .database_transaction
-                                        .data
-                                        .[<$bucket_name _document_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(document_id.clone(), vec![])), false)?
-                                        .take_while(|((current_document_id, _), _)| Ok(current_document_id == document_id))
-                                        .next()?
-                                        .is_some())
-                                }
+                            pub fn [<$bucket_name _contains_document_with_id>](&self, document_id: &DocumentId) -> Result<bool> {
+                                Ok(self
+                                    .index_transaction
+                                    .database_transaction
+                                    .data
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .iter(Bound::Included(&(document_id.clone(), vec![])), false)?
+                                    .take_while(|((current_document_id, _), _)| Ok(current_document_id == document_id))
+                                    .next()?
+                                    .is_some())
+                            }
 
-                                pub fn [<$bucket_name _contains_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
-                                    Ok(self
-                                        .index_transaction
-                                        .database_transaction
-                                        .data
-                                        .[<$bucket_name _document_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
-                                        .take_while(|((current_document_id, current_path), _)| {
-                                            Ok(current_document_id == document_id && current_path.starts_with(path))
-                                        })
-                                        .next()?
-                                        .is_some())
-                                }
+                            pub fn [<$bucket_name _contains_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
+                                Ok(self
+                                    .index_transaction
+                                    .database_transaction
+                                    .data
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id && current_path.starts_with(path))
+                                    })
+                                    .next()?
+                                    .is_some())
+                            }
 
-                                pub fn [<$bucket_name _contains_exact_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
-                                    Ok(self
-                                        .index_transaction
-                                        .database_transaction
-                                        .data
-                                        .[<$bucket_name _document_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
-                                        .take_while(|((current_document_id, current_path), _)| {
-                                            Ok(current_document_id == document_id && current_path == path)
-                                        })
-                                        .next()?
-                                        .is_some())
-                                }
+                            pub fn [<$bucket_name _contains_exact_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
+                                Ok(self
+                                    .index_transaction
+                                    .database_transaction
+                                    .data
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id && current_path == path)
+                                    })
+                                    .next()?
+                                    .is_some())
+                            }
 
-                                pub fn [<$bucket_name _contains_element>](
-                                    &self,
-                                    document_id: &DocumentId,
-                                    array_path: &Path,
-                                    element: &Value,
-                                ) -> Result<bool> {
-                                    self.index_transaction
-                                        .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
+                            pub fn [<$bucket_name _contains_element>](
+                                &self,
+                                document_id: &DocumentId,
+                                array_path: &Path,
+                                element: &Value,
+                            ) -> Result<bool> {
+                                self.index_transaction
+                                    .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
+                                        value: Digest::of_path_document_id_and_value(array_path, document_id, element)
+                                            .with_context(|| {
+                                                format!(
+                                                    "Can not compute array type digest for path {array_path:?}, \
+                                                     document id {:?} and value {element:?}",
+                                                    document_id
+                                                )
+                                            })?
+                                            .value,
+                                    }))
+                            }
+
+                            pub fn [<$bucket_name _get_element_index>](
+                                &self,
+                                document_id: &DocumentId,
+                                array_path: &Path,
+                                element: &Value,
+                            ) -> Result<Option<u32>> {
+                                Ok(self
+                                    .index_transaction
+                                    .[<$bucket_name _search>](
+                                        &vec![dream::Object::Identified(dream::Id {
                                             value: Digest::of_path_document_id_and_value(array_path, document_id, element)
                                                 .with_context(|| {
                                                     format!(
@@ -730,48 +755,26 @@ macro_rules! define_chest {
                                                     )
                                                 })?
                                                 .value,
-                                        }))
-                                }
-
-                                pub fn [<$bucket_name _get_element_index>](
-                                    &self,
-                                    document_id: &DocumentId,
-                                    array_path: &Path,
-                                    element: &Value,
-                                ) -> Result<Option<u32>> {
-                                    Ok(self
-                                        .index_transaction
-                                        .[<$bucket_name _search>](
-                                            &vec![dream::Object::Identified(dream::Id {
-                                                value: Digest::of_path_document_id_and_value(array_path, document_id, element)
-                                                    .with_context(|| {
-                                                        format!(
-                                                            "Can not compute array type digest for path {array_path:?}, \
-                                                             document id {:?} and value {element:?}",
-                                                            document_id
-                                                        )
-                                                    })?
-                                                    .value,
-                                            })],
-                                            &vec![],
-                                            None,
-                                        )?
-                                        .next()?
-                                        .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id)))
-                                }
+                                        })],
+                                        &vec![],
+                                        None,
+                                    )?
+                                    .next()?
+                                    .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id)))
                             }
-                        )*
-                    };
-                }
+                        }
+                    )*
+                };
+            }
 
-                impl<'a> ReadTransaction<'a> {
-                    define_read_methods!();
-                }
+            impl<'a> ReadTransaction<'a> {
+                define_read_methods!();
+            }
 
+            impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
+                define_read_methods!();
                 $(
-                    impl<'a, 'b, 'c> WriteTransaction<'a, 'b, 'c> {
-                        define_read_methods!();
-
+                    paste! {
                         fn [<$bucket_name _update_with_index>](
                             &mut self,
                             document_id: DocumentId,
@@ -1060,6 +1063,7 @@ mod tests {
 
     define_chest!(test_chest(
         main_bucket
+        another_bucket
     ) {
     } use {
     });
