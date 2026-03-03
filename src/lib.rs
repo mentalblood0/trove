@@ -473,7 +473,7 @@ macro_rules! define_chest {
                                     })
                                 }
 
-                                pub fn get_flattened(
+                                pub fn [<$bucket_name _get_flattened>](
                                     &'a self,
                                     document_id: &DocumentId,
                                     path_prefix: &Path,
@@ -508,14 +508,14 @@ macro_rules! define_chest {
                                     Ok(flat_document)
                                 }
 
-                                pub fn get(
+                                pub fn [<$bucket_name _get>](
                                     &'a self,
                                     document_id: &DocumentId,
                                     path_prefix: &Path,
                                 ) -> Result<Option<serde_json::Value>> {
                                     nest(
                                         &self
-                                            .get_flattened(document_id, path_prefix)
+                                            .[<$bucket_name _get_flattened>](document_id, path_prefix)
                                             .with_context(|| {
                                                 format!(
                                                     "Can not get part at path prefix {path_prefix:?} of flattened document \
@@ -525,7 +525,7 @@ macro_rules! define_chest {
                                     )
                                 }
 
-                                pub fn select(
+                                pub fn [<$bucket_name _select>](
                                     &'a self,
                                     presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
                                     absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
@@ -609,7 +609,7 @@ macro_rules! define_chest {
                                     ))
                                 }
 
-                                pub fn last_element_index(&self, document_id: &DocumentId, array_path: &Path) -> Result<Option<u32>> {
+                                pub fn [<$bucket_name _last_element_index>](&self, document_id: &DocumentId, array_path: &Path) -> Result<Option<u32>> {
                                     let iter_from = Bound::Included(&(
                                         document_id.clone(),
                                         array_path
@@ -654,18 +654,18 @@ macro_rules! define_chest {
                                         .or_else(|| if found_document { None } else { Some(0) }))
                                 }
 
-                                pub fn last(
+                                pub fn [<$bucket_name _last>](
                                     &self,
                                     document_id: &DocumentId,
                                     array_path: &Path,
                                 ) -> Result<Option<serde_json::Value>> {
-                                    if let Some(last_element_index) = self.last_element_index(document_id, array_path)? {
+                                    if let Some(last_element_index) = self.[<$bucket_name _last_element_index>](document_id, array_path)? {
                                         let result_path = array_path
                                             .iter()
                                             .cloned()
                                             .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
                                             .collect::<Vec<_>>();
-                                        Ok(Some(self.get(document_id, &result_path)?.ok_or_else(
+                                        Ok(Some(self.[<$bucket_name _get>](document_id, &result_path)?.ok_or_else(
                                             || anyhow!("Can not get last element of array at path {result_path:?}"),
                                         )?))
                                     } else {
@@ -673,7 +673,7 @@ macro_rules! define_chest {
                                     }
                                 }
 
-                                pub fn contains_document_with_id(&self, document_id: &DocumentId) -> Result<bool> {
+                                pub fn [<$bucket_name _contains_document_with_id>](&self, document_id: &DocumentId) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
@@ -685,7 +685,7 @@ macro_rules! define_chest {
                                         .is_some())
                                 }
 
-                                pub fn contains_path(&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
+                                pub fn [<$bucket_name _contains_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
@@ -699,7 +699,7 @@ macro_rules! define_chest {
                                         .is_some())
                                 }
 
-                                pub fn contains_exact_path(&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
+                                pub fn [<$bucket_name _contains_exact_path>](&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
@@ -713,7 +713,7 @@ macro_rules! define_chest {
                                         .is_some())
                                 }
 
-                                pub fn contains_element(
+                                pub fn [<$bucket_name _contains_element>](
                                     &self,
                                     document_id: &DocumentId,
                                     array_path: &Path,
@@ -733,7 +733,7 @@ macro_rules! define_chest {
                                         }))
                                 }
 
-                                pub fn get_element_index(
+                                pub fn [<$bucket_name _get_element_index>](
                                     &self,
                                     document_id: &DocumentId,
                                     array_path: &Path,
@@ -887,7 +887,7 @@ macro_rules! define_chest {
                             value: serde_json::Value,
                         ) -> Result<u32> {
                             let last_element_index= self
-                                .last_element_index(document_id, array_path)?
+                                .[<$bucket_name _last_element_index>](document_id, array_path)?
                                 .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
                             let push_path = array_path
                                 .iter()
@@ -1196,19 +1196,22 @@ mod tests {
                                 .collect::<Vec<_>>();
                             for (document_id, document_value) in new_documents.iter() {
                                 assert_eq!(
-                                    transaction.contains_document_with_id(document_id)?,
+                                    transaction
+                                        .main_bucket_contains_document_with_id(document_id)?,
                                     true
                                 );
-                                let result = transaction.get(&document_id, &vec![])?.unwrap();
+                                let result =
+                                    transaction.main_bucket_get(&document_id, &vec![])?.unwrap();
                                 assert_eq!(result, *document_value);
                                 let flatten_document = flatten(&vec![], &document_value)?;
                                 for (pathvalue_index, (path, value)) in
                                     flatten_document.iter().enumerate()
                                 {
-                                    transaction.contains_exact_path(document_id, path)?;
+                                    transaction
+                                        .main_bucket_contains_exact_path(document_id, path)?;
                                     for segments_count in 0..path.len() {
                                         assert_eq!(
-                                            transaction.contains_path(
+                                            transaction.main_bucket_contains_path(
                                                 document_id,
                                                 &path[..=segments_count].to_vec()
                                             )?,
@@ -1221,7 +1224,7 @@ mod tests {
                                         match last_path_segment {
                                             PathSegment::JsonObjectKey(_) => {
                                                 assert_eq!(
-                                                    transaction.contains_element(
+                                                    transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &base_path,
                                                         value
@@ -1230,12 +1233,15 @@ mod tests {
                                                 );
                                                 assert_eq!(
                                                     transaction
-                                                        .last_element_index(document_id, &base_path)
+                                                        .main_bucket_last_element_index(
+                                                            document_id,
+                                                            &base_path
+                                                        )
                                                         .unwrap(),
                                                     Some(0)
                                                 );
                                                 let selected = transaction
-                                                    .select(
+                                                    .main_bucket_select(
                                                         &vec![(
                                                             IndexRecordType::Direct,
                                                             path.clone(),
@@ -1248,7 +1254,10 @@ mod tests {
                                                 for selected_document_id in selected.iter() {
                                                     assert_eq!(
                                                         transaction
-                                                            .get(&selected_document_id, &path)?
+                                                            .main_bucket_get(
+                                                                &selected_document_id,
+                                                                &path
+                                                            )?
                                                             .unwrap(),
                                                         value_as_json
                                                     );
@@ -1261,7 +1270,7 @@ mod tests {
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
                                                 assert_eq!(
-                                                    transaction.contains_element(
+                                                    transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &base_path,
                                                         value
@@ -1270,7 +1279,7 @@ mod tests {
                                                 );
                                                 assert_eq!(
                                                     transaction
-                                                        .get_element_index(
+                                                        .main_bucket_get_element_index(
                                                             document_id,
                                                             &base_path,
                                                             value
@@ -1279,7 +1288,7 @@ mod tests {
                                                     Some(*current_array_index)
                                                 );
                                                 let selected = transaction
-                                                    .select(
+                                                    .main_bucket_select(
                                                         &vec![(
                                                             IndexRecordType::Array,
                                                             base_path.clone(),
@@ -1291,7 +1300,10 @@ mod tests {
                                                     .collect::<Vec<DocumentId>>()?;
                                                 for selected_document_id in selected.iter() {
                                                     assert!(transaction
-                                                        .get(&selected_document_id, &base_path)?
+                                                        .main_bucket_get(
+                                                            &selected_document_id,
+                                                            &base_path
+                                                        )?
                                                         .unwrap()
                                                         .as_array()
                                                         .unwrap()
@@ -1329,7 +1341,7 @@ mod tests {
                                                         .unwrap();
                                                     assert_eq!(
                                                         transaction
-                                                            .last_element_index(
+                                                            .main_bucket_last_element_index(
                                                                 document_id,
                                                                 &base_path
                                                             )
@@ -1338,7 +1350,10 @@ mod tests {
                                                     );
                                                     assert_eq!(
                                                         transaction
-                                                            .last(document_id, &base_path)
+                                                            .main_bucket_last(
+                                                                document_id,
+                                                                &base_path
+                                                            )
                                                             .unwrap(),
                                                         Some(value_as_json.clone())
                                                     );
@@ -1347,7 +1362,7 @@ mod tests {
                                         }
                                     } else {
                                         let selected = transaction
-                                            .select(
+                                            .main_bucket_select(
                                                 &vec![(
                                                     IndexRecordType::Direct,
                                                     vec![],
@@ -1360,7 +1375,10 @@ mod tests {
                                         for selected_document_id in selected.iter() {
                                             assert_eq!(
                                                 transaction
-                                                    .get(&selected_document_id, &vec![])?
+                                                    .main_bucket_get(
+                                                        &selected_document_id,
+                                                        &vec![]
+                                                    )?
                                                     .unwrap(),
                                                 value_as_json
                                             );
@@ -1391,8 +1409,14 @@ mod tests {
                                 .clone();
                             transaction.main_bucket_remove(&document_to_remove_id, &vec![])?;
                             previously_added_documents.remove(&document_to_remove_id);
-                            assert_eq!(transaction.get(&document_to_remove_id, &vec![])?, None);
-                            assert_eq!(transaction.get(&document_to_remove_id, &vec![])?, None);
+                            assert_eq!(
+                                transaction.main_bucket_get(&document_to_remove_id, &vec![])?,
+                                None
+                            );
+                            assert_eq!(
+                                transaction.main_bucket_get(&document_to_remove_id, &vec![])?,
+                                None
+                            );
                         }
                         3 => {
                             let document_to_remove_from_id = previously_added_documents
@@ -1400,8 +1424,8 @@ mod tests {
                                 .nth(rng.generate_range(0..previously_added_documents.len()))
                                 .unwrap()
                                 .clone();
-                            let flattened_document_to_remove_from =
-                                transaction.get_flattened(&document_to_remove_from_id, &vec![])?;
+                            let flattened_document_to_remove_from = transaction
+                                .main_bucket_get_flattened(&document_to_remove_from_id, &vec![])?;
                             let path_to_remove = flattened_document_to_remove_from
                                 [rng.generate_range(0..flattened_document_to_remove_from.len())]
                             .0
@@ -1423,11 +1447,15 @@ mod tests {
                                 );
                             }
                             assert_eq!(
-                                transaction.get(&document_to_remove_from_id, &path_to_remove)?,
+                                transaction.main_bucket_get(
+                                    &document_to_remove_from_id,
+                                    &path_to_remove
+                                )?,
                                 None
                             );
                             assert_eq!(
-                                transaction.get(&document_to_remove_from_id, &vec![])?,
+                                transaction
+                                    .main_bucket_get(&document_to_remove_from_id, &vec![])?,
                                 correct_result_option
                             );
                         }
@@ -1485,13 +1513,13 @@ mod tests {
 
                 assert_eq!(
                     &transaction
-                        .get(&document.id, &path_segments!("dict"))?
+                        .main_bucket_get(&document.id, &path_segments!("dict"))?
                         .unwrap(),
                     document.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
                     &transaction
-                        .get(&document.id, &path_segments!("dict", "hello"))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "hello"))?
                         .unwrap(),
                     document
                         .value
@@ -1506,7 +1534,7 @@ mod tests {
                 );
                 assert_eq!(
                     &transaction
-                        .get(&document.id, &path_segments!("dict", "boolean"))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "boolean"))?
                         .unwrap(),
                     document
                         .value
@@ -1521,7 +1549,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&document.id, &path_segments!("dict", "hello", 0))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "hello", 0))?
                         .unwrap(),
                     document
                         .value
@@ -1538,7 +1566,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&document.id, &path_segments!("dict", "hello", 1))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "hello", 1))?
                         .unwrap(),
                     document
                         .value
@@ -1555,7 +1583,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&document.id, &path_segments!("dict", "hello", 2))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "hello", 2))?
                         .unwrap(),
                     document
                         .value
@@ -1572,7 +1600,7 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&document.id, &path_segments!("dict", "hello", 3))?
+                        .main_bucket_get(&document.id, &path_segments!("dict", "hello", 3))?
                         .unwrap(),
                     document
                         .value
