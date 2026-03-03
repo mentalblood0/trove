@@ -3,6 +3,7 @@ use fallible_iterator::FallibleIterator;
 
 pub extern crate anyhow;
 pub extern crate dream;
+pub extern crate fallible_iterator;
 pub extern crate paste;
 pub extern crate serde;
 
@@ -69,9 +70,9 @@ pub enum PathSegment {
     JsonArrayIndex(u32),
 }
 
-type Path = Vec<PathSegment>;
+pub type Path = Vec<PathSegment>;
 
-type FlatDocument = Vec<(Path, Value)>;
+pub type FlatDocument = Vec<(Path, Value)>;
 
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     if flat_document.is_empty() {
