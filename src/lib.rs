@@ -248,7 +248,7 @@ macro_rules! define_chest {
             use $crate::{
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
-                dream, paste::paste, FallibleIterator,
+                dream, paste::paste, fallible_iterator::FallibleIterator,
                 DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, IndexRecordType, nest, flatten
             };
 
