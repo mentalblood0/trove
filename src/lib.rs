@@ -9,11 +9,11 @@ pub extern crate serde;
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
-pub struct ObjectId {
+pub struct DocumentId {
     pub value: [u8; 16],
 }
 
-impl ObjectId {
+impl DocumentId {
     pub fn new() -> Self {
         Self {
             value: *uuid::Uuid::now_v7().as_bytes(),
@@ -28,7 +28,7 @@ impl ObjectId {
     }
 }
 
-impl serde::Serialize for ObjectId {
+impl serde::Serialize for DocumentId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -40,7 +40,7 @@ impl serde::Serialize for ObjectId {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for ObjectId {
+impl<'de> serde::Deserialize<'de> for DocumentId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -53,13 +53,13 @@ impl<'de> serde::Deserialize<'de> for ObjectId {
         let value: [u8; 16] = value.try_into().map_err(|v: Vec<u8>| {
             serde::de::Error::custom(format!("expected 16 bytes, got {}", v.len()))
         })?;
-        Ok(ObjectId { value })
+        Ok(DocumentId { value })
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Object {
-    pub id: ObjectId,
+pub struct Document {
+    pub id: DocumentId,
     pub value: serde_json::Value,
 }
 
@@ -71,16 +71,16 @@ pub enum PathSegment {
 
 type Path = Vec<PathSegment>;
 
-type FlatObject = Vec<(Path, Value)>;
+type FlatDocument = Vec<(Path, Value)>;
 
-pub fn nest(flat_object: &FlatObject) -> Result<Option<serde_json::Value>> {
-    if flat_object.is_empty() {
+pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
+    if flat_document.is_empty() {
         Ok(None)
-    } else if flat_object[0].0.is_empty() {
-        Ok(Some(flat_object[0].1.clone().into()))
+    } else if flat_document[0].0.is_empty() {
+        Ok(Some(flat_document[0].1.clone().into()))
     } else {
         let mut result = serde_json::Value::Null;
-        for (path, value) in flat_object {
+        for (path, value) in flat_document {
             let mut current = &mut result;
             for path_segment in path {
                 match path_segment {
@@ -199,9 +199,9 @@ impl Digest {
         Ok(Self::of_data(&data))
     }
 
-    pub fn of_path_object_id_and_value(
+    pub fn of_path_document_id_and_value(
         path: &Path,
-        object_id: &ObjectId,
+        object_id: &DocumentId,
         value: &Value,
     ) -> Result<Self> {
         let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
@@ -217,10 +217,10 @@ impl Digest {
     }
 }
 
-pub struct ObjectsIterator<'a> {
+pub struct DocumentsIterator<'a> {
     data_table_iterator:
-        Box<dyn FallibleIterator<Item = ((ObjectId, Path), Value), Error = Error> + 'a>,
-    last_entry: Option<((ObjectId, Path), Value)>,
+        Box<dyn FallibleIterator<Item = ((DocumentId, Path), Value), Error = Error> + 'a>,
+    last_entry: Option<((DocumentId, Path), Value)>,
 }
 
 #[macro_export]
@@ -248,7 +248,7 @@ macro_rules! define_chest {
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, FallibleIterator,
-                ObjectId, Object, Path, Value, ObjectsIterator, FlatObject, Digest, PathSegment, IndexRecordType, nest, flatten
+                DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, IndexRecordType, nest, flatten
             };
 
             paste! {
@@ -257,7 +257,7 @@ macro_rules! define_chest {
                 ) {
                     data {
                         $(
-                            [<$bucket_name _object_id_and_path_to_value>]<(ObjectId, Path), JsonValue>
+                            [<$bucket_name _document_id_and_path_to_value>]<(DocumentId, Path), JsonValue>
                         )+
                     }
                     $(
@@ -266,7 +266,7 @@ macro_rules! define_chest {
                         }
                     )*
                 } use {
-                    use $crate::ObjectId;
+                    use $crate::DocumentId;
                     use $crate::Path;
                     use $crate::Value as JsonValue;
                     $($use_item)*
@@ -330,15 +330,15 @@ macro_rules! define_chest {
                 $(
                     #[derive(Debug, Clone)]
                     struct [<$bucket_name:camel IndexBatch>] {
-                        object_id: ObjectId,
+                        document_id: DocumentId,
                         digests: Vec<dream::Object>,
                         array_digests: HashMap<u32, Vec<dream::Object>>,
                     }
 
                     impl [<$bucket_name:camel IndexBatch>] {
-                        fn new(object_id: ObjectId) -> Self {
+                        fn new(document_id: DocumentId) -> Self {
                             Self {
-                                object_id,
+                                document_id,
                                 digests: Vec::new(),
                                 array_digests: HashMap::new(),
                             }
@@ -368,12 +368,12 @@ macro_rules! define_chest {
                                     .entry(*path_index)
                                     .or_insert(Vec::new())
                                     .push(dream::Object::Identified(dream::Id {
-                                        value: Digest::of_path_object_id_and_value(&path_base, &self.object_id, &value)
+                                        value: Digest::of_path_document_id_and_value(&path_base, &self.document_id, &value)
                                             .with_context(|| {
                                                 format!(
                                                     "Can not compute array type digest for path {path_base:?}, object \
                                                      id {:?} and value {value:?}",
-                                                    self.object_id
+                                                    self.document_id
                                                 )
                                             })?
                                             .value,
@@ -407,7 +407,7 @@ macro_rules! define_chest {
                             Box::new(
                                 vec![(
                                     dream::Id {
-                                        value: self.object_id.value,
+                                        value: self.document_id.value,
                                     },
                                     &self.digests,
                                 )]
@@ -457,16 +457,16 @@ macro_rules! define_chest {
                     () => {
                         $(
                             paste! {
-                                pub fn [<$bucket_name _objects>](&'a self) -> Result<ObjectsIterator<'a>> {
-                                    Ok(ObjectsIterator {
+                                pub fn [<$bucket_name _documents>](&'a self) -> Result<DocumentsIterator<'a>> {
+                                    Ok(DocumentsIterator {
                                         data_table_iterator: self
                                             .index_transaction
                                             .database_transaction
                                             .data
-                                            .[<$bucket_name _object_id_and_path_to_value>]
+                                            .[<$bucket_name _document_id_and_path_to_value>]
                                             .iter(Bound::Unbounded, false)
                                             .with_context(|| {
-                                                "Can not initiate iteration over object_id_and_path_to_value table"
+                                                "Can not initiate iteration over document_id_and_path_to_value table"
                                             })?,
                                         last_entry: None,
                                     })
@@ -474,51 +474,51 @@ macro_rules! define_chest {
 
                                 pub fn get_flattened(
                                     &'a self,
-                                    object_id: &ObjectId,
+                                    document_id: &DocumentId,
                                     path_prefix: &Path,
-                                ) -> Result<FlatObject> {
-                                    let mut flat_object: FlatObject = Vec::new();
-                                    let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
+                                ) -> Result<FlatDocument> {
+                                    let mut flat_document: FlatDocument = Vec::new();
+                                    let from_document_id_and_path = &(document_id.clone(), path_prefix.clone());
                                     let mut iterator = self
                                         .index_transaction
                                         .database_transaction
                                         .data
-                                        .[<$bucket_name _object_id_and_path_to_value>]
-                                        .iter(Bound::Included(from_object_id_and_path), false)
+                                        .[<$bucket_name _document_id_and_path_to_value>]
+                                        .iter(Bound::Included(from_document_id_and_path), false)
                                         .with_context(|| {
                                             format!(
-                                                "Can not initiate iteration over object_id_and_path_to_value table from \
-                                                 key {from_object_id_and_path:?}"
+                                                "Can not initiate iteration over document_id_and_path_to_value table from \
+                                                 key {from_document_id_and_path:?}"
                                             )
                                         })?
                                         .take_while(|entry| {
-                                            Ok(entry.0 .0 == *object_id
+                                            Ok(entry.0 .0 == *document_id
                                                 && (path_prefix.is_empty()
                                                     || entry.0 .1 == *path_prefix
                                                     || entry.0 .1.starts_with(&path_prefix)))
                                         });
                                     loop {
                                         if let Some(entry) = iterator.next()? {
-                                            flat_object.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
+                                            flat_document.push((entry.0 .1.clone()[path_prefix.len()..].to_vec(), entry.1));
                                         } else {
                                             break;
                                         }
                                     }
-                                    Ok(flat_object)
+                                    Ok(flat_document)
                                 }
 
                                 pub fn get(
                                     &'a self,
-                                    object_id: &ObjectId,
+                                    document_id: &DocumentId,
                                     path_prefix: &Path,
                                 ) -> Result<Option<serde_json::Value>> {
                                     nest(
                                         &self
-                                            .get_flattened(object_id, path_prefix)
+                                            .get_flattened(document_id, path_prefix)
                                             .with_context(|| {
                                                 format!(
-                                                    "Can not get part at path prefix {path_prefix:?} of flattened object \
-                                                     with id {object_id:?}"
+                                                    "Can not get part at path prefix {path_prefix:?} of flattened document \
+                                                     with id {document_id:?}"
                                                 )
                                             })?,
                                     )
@@ -528,8 +528,8 @@ macro_rules! define_chest {
                                     &'a self,
                                     presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
                                     absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-                                    start_after_object: Option<ObjectId>,
-                                ) -> Result<Box<dyn FallibleIterator<Item = ObjectId, Error = Error> + '_>> {
+                                    start_after_document: Option<DocumentId>,
+                                ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
                                     let present_ids = {
                                         let mut result = Vec::new();
                                         for (index_record_type, path, value) in presention_conditions {
@@ -540,7 +540,7 @@ macro_rules! define_chest {
                                                     &value.clone().try_into().with_context(|| {
                                                         format!(
                                                             "Can not convert json value {value:?} to database storable \
-                                                             value so to select objects where ({index_record_type:?}, \
+                                                             value so to select documents where ({index_record_type:?}, \
                                                              {path:?}, {value:?}) is present"
                                                         )
                                                     })?,
@@ -566,7 +566,7 @@ macro_rules! define_chest {
                                                     &value.clone().try_into().with_context(|| {
                                                         format!(
                                                             "Can not convert json value {value:?} to database storable \
-                                                             value so to select objects where ({index_record_type:?}, \
+                                                             value so to select documents where ({index_record_type:?}, \
                                                              {path:?}, {value:?}) is absent"
                                                         )
                                                     })?,
@@ -587,9 +587,9 @@ macro_rules! define_chest {
                                             .[<$bucket_name _search>](
                                                 &present_ids,
                                                 &absent_ids,
-                                                start_after_object.and_then(|start_after_object| {
+                                                start_after_document.and_then(|start_after_document| {
                                                     Some(dream::Id {
-                                                        value: start_after_object.value,
+                                                        value: start_after_document.value,
                                                     })
                                                 }),
                                             )
@@ -601,31 +601,31 @@ macro_rules! define_chest {
                                                 )
                                             })?
                                             .map(|dream_id| {
-                                                Ok(ObjectId {
+                                                Ok(DocumentId {
                                                     value: dream_id.value,
                                                 })
                                             }),
                                     ))
                                 }
 
-                                pub fn last_element_index(&self, object_id: &ObjectId, array_path: &Path) -> Result<Option<u32>> {
+                                pub fn last_element_index(&self, document_id: &DocumentId, array_path: &Path) -> Result<Option<u32>> {
                                     let iter_from = Bound::Included(&(
-                                        object_id.clone(),
+                                        document_id.clone(),
                                         array_path
                                             .iter()
                                             .cloned()
                                             .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
                                             .collect::<Path>(),
                                     ));
-                                    let mut found_object = false;
+                                    let mut found_document = false;
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
                                         .data
-                                        .[<$bucket_name _object_id_and_path_to_value>]
+                                        .[<$bucket_name _document_id_and_path_to_value>]
                                         .iter(iter_from, true)?
-                                        .take_while(|((current_object_id, current_path), _)| {
-                                            Ok(current_object_id == object_id
+                                        .take_while(|((current_document_id, current_path), _)| {
+                                            Ok(current_document_id == document_id
                                                 && current_path.starts_with(&array_path)
                                                 && if let Some(PathSegment::JsonArrayIndex(_)) =
                                                     current_path.get(array_path.len())
@@ -636,7 +636,7 @@ macro_rules! define_chest {
                                                 })
                                         })
                                         .map(|((_, result_path), _)| {
-                                            found_object = true;
+                                            found_document = true;
                                             Ok(match result_path.get(array_path.len()).ok_or_else(|| {
                                                 anyhow!("Can not get last element of result path {result_path:?}")
                                             })? {
@@ -650,21 +650,21 @@ macro_rules! define_chest {
                                             } + 1)
                                         })
                                         .next()?
-                                        .or_else(|| if found_object { None } else { Some(0) }))
+                                        .or_else(|| if found_document { None } else { Some(0) }))
                                 }
 
                                 pub fn last(
                                     &self,
-                                    object_id: &ObjectId,
+                                    document_id: &DocumentId,
                                     array_path: &Path,
                                 ) -> Result<Option<serde_json::Value>> {
-                                    if let Some(last_element_index) = self.last_element_index(object_id, array_path)? {
+                                    if let Some(last_element_index) = self.last_element_index(document_id, array_path)? {
                                         let result_path = array_path
                                             .iter()
                                             .cloned()
                                             .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
                                             .collect::<Vec<_>>();
-                                        Ok(Some(self.get(object_id, &result_path)?.ok_or_else(
+                                        Ok(Some(self.get(document_id, &result_path)?.ok_or_else(
                                             || anyhow!("Can not get last element of array at path {result_path:?}"),
                                         )?))
                                     } else {
@@ -672,41 +672,41 @@ macro_rules! define_chest {
                                     }
                                 }
 
-                                pub fn contains_object_with_id(&self, object_id: &ObjectId) -> Result<bool> {
+                                pub fn contains_document_with_id(&self, document_id: &DocumentId) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
                                         .data
-                                        .[<$bucket_name _object_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(object_id.clone(), vec![])), false)?
-                                        .take_while(|((current_object_id, _), _)| Ok(current_object_id == object_id))
+                                        .[<$bucket_name _document_id_and_path_to_value>]
+                                        .iter(Bound::Included(&(document_id.clone(), vec![])), false)?
+                                        .take_while(|((current_document_id, _), _)| Ok(current_document_id == document_id))
                                         .next()?
                                         .is_some())
                                 }
 
-                                pub fn contains_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
+                                pub fn contains_path(&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
                                         .data
-                                        .[<$bucket_name _object_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
-                                        .take_while(|((current_object_id, current_path), _)| {
-                                            Ok(current_object_id == object_id && current_path.starts_with(path))
+                                        .[<$bucket_name _document_id_and_path_to_value>]
+                                        .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
+                                        .take_while(|((current_document_id, current_path), _)| {
+                                            Ok(current_document_id == document_id && current_path.starts_with(path))
                                         })
                                         .next()?
                                         .is_some())
                                 }
 
-                                pub fn contains_exact_path(&self, object_id: &ObjectId, path: &Path) -> Result<bool> {
+                                pub fn contains_exact_path(&self, document_id: &DocumentId, path: &Path) -> Result<bool> {
                                     Ok(self
                                         .index_transaction
                                         .database_transaction
                                         .data
-                                        .[<$bucket_name _object_id_and_path_to_value>]
-                                        .iter(Bound::Included(&(object_id.clone(), path.clone())), false)?
-                                        .take_while(|((current_object_id, current_path), _)| {
-                                            Ok(current_object_id == object_id && current_path == path)
+                                        .[<$bucket_name _document_id_and_path_to_value>]
+                                        .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
+                                        .take_while(|((current_document_id, current_path), _)| {
+                                            Ok(current_document_id == document_id && current_path == path)
                                         })
                                         .next()?
                                         .is_some())
@@ -714,18 +714,18 @@ macro_rules! define_chest {
 
                                 pub fn contains_element(
                                     &self,
-                                    object_id: &ObjectId,
+                                    document_id: &DocumentId,
                                     array_path: &Path,
                                     element: &Value,
                                 ) -> Result<bool> {
                                     self.index_transaction
                                         .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
-                                            value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                                            value: Digest::of_path_document_id_and_value(array_path, document_id, element)
                                                 .with_context(|| {
                                                     format!(
                                                         "Can not compute array type digest for path {array_path:?}, \
-                                                         object id {:?} and value {element:?}",
-                                                        object_id
+                                                         document id {:?} and value {element:?}",
+                                                        document_id
                                                     )
                                                 })?
                                                 .value,
@@ -734,7 +734,7 @@ macro_rules! define_chest {
 
                                 pub fn get_element_index(
                                     &self,
-                                    object_id: &ObjectId,
+                                    document_id: &DocumentId,
                                     array_path: &Path,
                                     element: &Value,
                                 ) -> Result<Option<u32>> {
@@ -742,12 +742,12 @@ macro_rules! define_chest {
                                         .index_transaction
                                         .[<$bucket_name _search>](
                                             &vec![dream::Object::Identified(dream::Id {
-                                                value: Digest::of_path_object_id_and_value(array_path, object_id, element)
+                                                value: Digest::of_path_document_id_and_value(array_path, document_id, element)
                                                     .with_context(|| {
                                                         format!(
                                                             "Can not compute array type digest for path {array_path:?}, \
-                                                             object id {:?} and value {element:?}",
-                                                            object_id
+                                                             document id {:?} and value {element:?}",
+                                                            document_id
                                                         )
                                                     })?
                                                     .value,
@@ -773,11 +773,11 @@ macro_rules! define_chest {
 
                         fn [<$bucket_name _update_with_index>](
                             &mut self,
-                            object_id: ObjectId,
+                            document_id: DocumentId,
                             path: Path,
                             value: serde_json::Value,
                             index_batch: &mut [<$bucket_name:camel IndexBatch>],
-                        ) -> Result<ObjectId> {
+                        ) -> Result<DocumentId> {
                             for (internal_path, internal_value) in flatten(&path, &value)
                                 .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
                             {
@@ -792,78 +792,78 @@ macro_rules! define_chest {
                                 self.index_transaction
                                     .database_transaction
                                     .data
-                                    .[<$bucket_name _object_id_and_path_to_value>]
-                                    .insert((object_id.clone(), internal_path), internal_value);
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .insert((document_id.clone(), internal_path), internal_value);
                             }
-                            Ok(object_id)
+                            Ok(document_id)
                         }
 
                         pub fn [<$bucket_name _update>](
                             &mut self,
-                            object_id: ObjectId,
+                            document_id: DocumentId,
                             path: Path,
                             value: serde_json::Value,
-                        ) -> Result<ObjectId> {
-                            let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(object_id.clone());
+                        ) -> Result<DocumentId> {
+                            let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
                             self.[<$bucket_name _update_with_index>](
-                                object_id.clone(),
+                                document_id.clone(),
                                 path.clone(),
                                 value.clone(),
                                 &mut index_batch,
                             )
                             .with_context(|| {
                                 format!(
-                                    "Can not update object with id {object_id:?} with path-value pair ({path:?}, \
+                                    "Can not update document with id {document_id:?} with path-value pair ({path:?}, \
                                      {value:?}) also updating index batch {index_batch:?}"
                                 )
                             })?;
                             index_batch
                                 .flush_insert(self.index_transaction)
                                 .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
-                            Ok(object_id)
+                            Ok(document_id)
                         }
 
-                        pub fn [<$bucket_name _insert>](&mut self, value: serde_json::Value) -> Result<ObjectId> {
-                            let id = ObjectId::new();
+                        pub fn [<$bucket_name _insert>](&mut self, value: serde_json::Value) -> Result<DocumentId> {
+                            let id = DocumentId::new();
                             self.[<$bucket_name _update>](id.clone(), vec![], value)
                         }
 
-                        pub fn [<$bucket_name _insert_with_id>](&mut self, object: Object) -> Result<ObjectId> {
-                            self.[<$bucket_name _update>](object.id, vec![], object.value)
+                        pub fn [<$bucket_name _insert_with_id>](&mut self, document: Document) -> Result<DocumentId> {
+                            self.[<$bucket_name _update>](document.id, vec![], document.value)
                         }
 
-                        pub fn [<$bucket_name _remove>](&mut self, object_id: &ObjectId, path_prefix: &Path) -> Result<()> {
-                            let from_object_id_and_path = &(object_id.clone(), path_prefix.clone());
+                        pub fn [<$bucket_name _remove>](&mut self, document_id: &DocumentId, path_prefix: &Path) -> Result<()> {
+                            let from_document_id_and_path = &(document_id.clone(), path_prefix.clone());
                             let paths_to_remove = self
                                 .index_transaction
                                 .database_transaction
                                 .data
-                                .[<$bucket_name _object_id_and_path_to_value>]
-                                .iter(Bound::Included(from_object_id_and_path), false)
+                                .[<$bucket_name _document_id_and_path_to_value>]
+                                .iter(Bound::Included(from_document_id_and_path), false)
                                 .with_context(|| {
                                     format!(
-                                        "Can not initiate iteration over object_id_and_path_to_value table starting \
-                                         from key {from_object_id_and_path:?}"
+                                        "Can not initiate iteration over document_id_and_path_to_value table starting \
+                                         from key {from_document_id_and_path:?}"
                                     )
                                 })?
-                                .take_while(|((current_object_id, current_path), _)| {
-                                    Ok(*current_object_id == *object_id && current_path.starts_with(&path_prefix))
+                                .take_while(|((current_document_id, current_path), _)| {
+                                    Ok(*current_document_id == *document_id && current_path.starts_with(&path_prefix))
                                 })
                                 .collect::<Vec<_>>()
                                 .with_context(|| {
                                     format!(
-                                        "Can not collect from iteration over object_id_and_path_to_value table \
-                                         starting from key {from_object_id_and_path:?} taking while object id is \
-                                         {object_id:?} and path starts with {path_prefix:?}"
+                                        "Can not collect from iteration over document_id_and_path_to_value table \
+                                         starting from key {from_document_id_and_path:?} taking while document id is \
+                                         {document_id:?} and path starts with {path_prefix:?}"
                                     )
                                 })?;
-                            let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(object_id.clone());
+                            let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
                             for ((_, current_path), current_value) in paths_to_remove.into_iter() {
                                 self.index_transaction
                                     .database_transaction
                                     .data
-                                    .[<$bucket_name _object_id_and_path_to_value>]
-                                    .remove(&(object_id.clone(), current_path.clone()));
+                                    .[<$bucket_name _document_id_and_path_to_value>]
+                                    .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
                                     .push(current_path.clone(), current_value.clone())
                                     .with_context(|| {
@@ -881,19 +881,19 @@ macro_rules! define_chest {
 
                         pub fn [<$bucket_name _push>](
                             &mut self,
-                            object_id: &ObjectId,
+                            document_id: &DocumentId,
                             array_path: &Path,
                             value: serde_json::Value,
                         ) -> Result<u32> {
                             let last_element_index= self
-                                .last_element_index(object_id, array_path)?
+                                .last_element_index(document_id, array_path)?
                                 .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
                             let push_path = array_path
                                 .iter()
                                 .cloned()
                                 .chain(vec![PathSegment::JsonArrayIndex(last_element_index)].into_iter())
                                 .collect::<Vec<_>>();
-                            self.[<$bucket_name _update>](object_id.clone(), push_path, value)?;
+                            self.[<$bucket_name _update>](document_id.clone(), push_path, value)?;
                             Ok(last_element_index)
                         }
                     }
@@ -903,8 +903,8 @@ macro_rules! define_chest {
     };
 }
 
-impl<'a> FallibleIterator for ObjectsIterator<'a> {
-    type Item = Object;
+impl<'a> FallibleIterator for DocumentsIterator<'a> {
+    type Item = Document;
     type Error = Error;
 
     fn next(&mut self) -> Result<Option<Self::Item>> {
@@ -914,10 +914,10 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                 .next()
                 .with_context(|| "Can not get first data table entry")?;
         }
-        if let Some(first_object_entry) = self.last_entry.clone() {
-            let object_id = first_object_entry.0 .0;
-            let mut flat_object: FlatObject = Vec::new();
-            flat_object.push((first_object_entry.0 .1, first_object_entry.1));
+        if let Some(first_document_entry) = self.last_entry.clone() {
+            let document_id = first_document_entry.0 .0;
+            let mut flat_document: FlatDocument = Vec::new();
+            flat_document.push((first_document_entry.0 .1, first_document_entry.1));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
                     format!(
@@ -926,17 +926,17 @@ impl<'a> FallibleIterator for ObjectsIterator<'a> {
                     )
                 })?;
                 if let Some(current_entry) = &self.last_entry {
-                    if current_entry.0 .0 != object_id {
+                    if current_entry.0 .0 != document_id {
                         break;
                     }
-                    flat_object.push((current_entry.0 .1.clone(), current_entry.1.clone()));
+                    flat_document.push((current_entry.0 .1.clone(), current_entry.1.clone()));
                 } else {
                     break;
                 }
             }
-            Ok(nest(&flat_object)?.and_then(|value| {
-                Some(Object {
-                    id: object_id,
+            Ok(nest(&flat_document)?.and_then(|value| {
+                Some(Document {
+                    id: document_id,
                     value,
                 })
             }))
@@ -1053,7 +1053,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::Object;
+    use crate::Document;
     use fallible_iterator::FallibleIterator;
     use pretty_assertions::assert_eq;
 
@@ -1177,35 +1177,38 @@ mod tests {
 
         chest
             .lock_all_and_write(|transaction| {
-                let mut previously_added_objects: BTreeMap<ObjectId, serde_json::Value> =
+                let mut previously_added_documents: BTreeMap<DocumentId, serde_json::Value> =
                     BTreeMap::new();
                 for _ in 0..400 {
-                    let action_id = if previously_added_objects.is_empty() {
+                    let action_id = if previously_added_documents.is_empty() {
                         1
                     } else {
                         rng.generate_range(1..=3)
                     };
                     match action_id {
                         1 => {
-                            let new_objects = (0..1)
+                            let new_documents = (0..1)
                                 .map(|_| {
                                     let json = json_generator.generate(3);
                                     (transaction.main_bucket_insert(json.clone()).unwrap(), json)
                                 })
                                 .collect::<Vec<_>>();
-                            for (object_id, object_value) in new_objects.iter() {
-                                assert_eq!(transaction.contains_object_with_id(object_id)?, true);
-                                let result = transaction.get(&object_id, &vec![])?.unwrap();
-                                assert_eq!(result, *object_value);
-                                let flatten_object = flatten(&vec![], &object_value)?;
+                            for (document_id, document_value) in new_documents.iter() {
+                                assert_eq!(
+                                    transaction.contains_document_with_id(document_id)?,
+                                    true
+                                );
+                                let result = transaction.get(&document_id, &vec![])?.unwrap();
+                                assert_eq!(result, *document_value);
+                                let flatten_document = flatten(&vec![], &document_value)?;
                                 for (pathvalue_index, (path, value)) in
-                                    flatten_object.iter().enumerate()
+                                    flatten_document.iter().enumerate()
                                 {
-                                    transaction.contains_exact_path(object_id, path)?;
+                                    transaction.contains_exact_path(document_id, path)?;
                                     for segments_count in 0..path.len() {
                                         assert_eq!(
                                             transaction.contains_path(
-                                                object_id,
+                                                document_id,
                                                 &path[..=segments_count].to_vec()
                                             )?,
                                             true
@@ -1218,13 +1221,15 @@ mod tests {
                                             PathSegment::JsonObjectKey(_) => {
                                                 assert_eq!(
                                                     transaction.contains_element(
-                                                        object_id, &base_path, value
+                                                        document_id,
+                                                        &base_path,
+                                                        value
                                                     )?,
                                                     false
                                                 );
                                                 assert_eq!(
                                                     transaction
-                                                        .last_element_index(object_id, &base_path)
+                                                        .last_element_index(document_id, &base_path)
                                                         .unwrap(),
                                                     Some(0)
                                                 );
@@ -1238,32 +1243,36 @@ mod tests {
                                                         &vec![],
                                                         None,
                                                     )?
-                                                    .collect::<Vec<ObjectId>>()?;
-                                                for selected_object_id in selected.iter() {
+                                                    .collect::<Vec<DocumentId>>()?;
+                                                for selected_document_id in selected.iter() {
                                                     assert_eq!(
                                                         transaction
-                                                            .get(&selected_object_id, &path)?
+                                                            .get(&selected_document_id, &path)?
                                                             .unwrap(),
                                                         value_as_json
                                                     );
                                                 }
                                                 assert!(selected.iter().any(
-                                                    |selected_object_id| {
-                                                        selected_object_id == object_id
+                                                    |selected_document_id| {
+                                                        selected_document_id == document_id
                                                     }
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
                                                 assert_eq!(
                                                     transaction.contains_element(
-                                                        object_id, &base_path, value
+                                                        document_id,
+                                                        &base_path,
+                                                        value
                                                     )?,
                                                     true
                                                 );
                                                 assert_eq!(
                                                     transaction
                                                         .get_element_index(
-                                                            object_id, &base_path, value
+                                                            document_id,
+                                                            &base_path,
+                                                            value
                                                         )
                                                         .unwrap(),
                                                     Some(*current_array_index)
@@ -1278,10 +1287,10 @@ mod tests {
                                                         &vec![],
                                                         None,
                                                     )?
-                                                    .collect::<Vec<ObjectId>>()?;
-                                                for selected_object_id in selected.iter() {
+                                                    .collect::<Vec<DocumentId>>()?;
+                                                for selected_document_id in selected.iter() {
                                                     assert!(transaction
-                                                        .get(&selected_object_id, &base_path)?
+                                                        .get(&selected_document_id, &base_path)?
                                                         .unwrap()
                                                         .as_array()
                                                         .unwrap()
@@ -1291,11 +1300,11 @@ mod tests {
                                                         }));
                                                 }
                                                 assert!(selected.iter().any(
-                                                    |selected_object_id| {
-                                                        selected_object_id == object_id
+                                                    |selected_document_id| {
+                                                        selected_document_id == document_id
                                                     }
                                                 ));
-                                                if flatten_object
+                                                if flatten_document
                                                     .get(pathvalue_index + 1)
                                                     .is_none_or(|(next_path, _)| {
                                                         next_path.starts_with(&base_path)
@@ -1308,11 +1317,11 @@ mod tests {
                                                     })
                                                 {
                                                     transaction
-                                                        .main_bucket_remove(object_id, path)
+                                                        .main_bucket_remove(document_id, path)
                                                         .unwrap();
                                                     transaction
                                                         .main_bucket_push(
-                                                            object_id,
+                                                            document_id,
                                                             &base_path,
                                                             value_as_json.clone(),
                                                         )
@@ -1320,14 +1329,15 @@ mod tests {
                                                     assert_eq!(
                                                         transaction
                                                             .last_element_index(
-                                                                object_id, &base_path
+                                                                document_id,
+                                                                &base_path
                                                             )
                                                             .unwrap(),
                                                         Some(*current_array_index + 1),
                                                     );
                                                     assert_eq!(
                                                         transaction
-                                                            .last(object_id, &base_path)
+                                                            .last(document_id, &base_path)
                                                             .unwrap(),
                                                         Some(value_as_json.clone())
                                                     );
@@ -1345,78 +1355,78 @@ mod tests {
                                                 &vec![],
                                                 None,
                                             )?
-                                            .collect::<Vec<ObjectId>>()?;
-                                        for selected_object_id in selected.iter() {
+                                            .collect::<Vec<DocumentId>>()?;
+                                        for selected_document_id in selected.iter() {
                                             assert_eq!(
                                                 transaction
-                                                    .get(&selected_object_id, &vec![])?
+                                                    .get(&selected_document_id, &vec![])?
                                                     .unwrap(),
                                                 value_as_json
                                             );
                                         }
-                                        assert!(selected.iter().any(|selected_object_id| {
-                                            selected_object_id == object_id
+                                        assert!(selected.iter().any(|selected_document_id| {
+                                            selected_document_id == document_id
                                         }));
                                     }
                                 }
                             }
-                            previously_added_objects.extend(new_objects);
+                            previously_added_documents.extend(new_documents);
                             assert_eq!(
                                 transaction
-                                    .main_bucket_objects()?
-                                    .map(|current_object| Ok((
-                                        current_object.id,
-                                        current_object.value
+                                    .main_bucket_documents()?
+                                    .map(|current_document| Ok((
+                                        current_document.id,
+                                        current_document.value
                                     )))
                                     .collect::<BTreeMap<_, _>>()?,
-                                previously_added_objects
+                                previously_added_documents
                             );
                         }
                         2 => {
-                            let object_to_remove_id = previously_added_objects
+                            let document_to_remove_id = previously_added_documents
                                 .keys()
-                                .nth(rng.generate_range(0..previously_added_objects.len()))
+                                .nth(rng.generate_range(0..previously_added_documents.len()))
                                 .unwrap()
                                 .clone();
-                            transaction.main_bucket_remove(&object_to_remove_id, &vec![])?;
-                            previously_added_objects.remove(&object_to_remove_id);
-                            assert_eq!(transaction.get(&object_to_remove_id, &vec![])?, None);
-                            assert_eq!(transaction.get(&object_to_remove_id, &vec![])?, None);
+                            transaction.main_bucket_remove(&document_to_remove_id, &vec![])?;
+                            previously_added_documents.remove(&document_to_remove_id);
+                            assert_eq!(transaction.get(&document_to_remove_id, &vec![])?, None);
+                            assert_eq!(transaction.get(&document_to_remove_id, &vec![])?, None);
                         }
                         3 => {
-                            let object_to_remove_from_id = previously_added_objects
+                            let document_to_remove_from_id = previously_added_documents
                                 .keys()
-                                .nth(rng.generate_range(0..previously_added_objects.len()))
+                                .nth(rng.generate_range(0..previously_added_documents.len()))
                                 .unwrap()
                                 .clone();
-                            let flattened_object_to_remove_from =
-                                transaction.get_flattened(&object_to_remove_from_id, &vec![])?;
-                            let path_to_remove = flattened_object_to_remove_from
-                                [rng.generate_range(0..flattened_object_to_remove_from.len())]
+                            let flattened_document_to_remove_from =
+                                transaction.get_flattened(&document_to_remove_from_id, &vec![])?;
+                            let path_to_remove = flattened_document_to_remove_from
+                                [rng.generate_range(0..flattened_document_to_remove_from.len())]
                             .0
                             .clone();
                             let correct_result_option = nest(
-                                &flattened_object_to_remove_from
+                                &flattened_document_to_remove_from
                                     .into_iter()
                                     .filter(|(path, _)| !path.starts_with(&path_to_remove))
                                     .map(|(path, value)| (path, value.into()))
                                     .collect::<Vec<_>>(),
                             )?;
                             transaction
-                                .main_bucket_remove(&object_to_remove_from_id, &path_to_remove)?;
-                            previously_added_objects.remove(&object_to_remove_from_id);
+                                .main_bucket_remove(&document_to_remove_from_id, &path_to_remove)?;
+                            previously_added_documents.remove(&document_to_remove_from_id);
                             if let Some(ref correct_result) = correct_result_option {
-                                previously_added_objects.insert(
-                                    object_to_remove_from_id.clone(),
+                                previously_added_documents.insert(
+                                    document_to_remove_from_id.clone(),
                                     correct_result.clone(),
                                 );
                             }
                             assert_eq!(
-                                transaction.get(&object_to_remove_from_id, &path_to_remove)?,
+                                transaction.get(&document_to_remove_from_id, &path_to_remove)?,
                                 None
                             );
                             assert_eq!(
-                                transaction.get(&object_to_remove_from_id, &vec![])?,
+                                transaction.get(&document_to_remove_from_id, &vec![])?,
                                 correct_result_option
                             );
                         }
@@ -1431,17 +1441,17 @@ mod tests {
     #[test]
     fn test_dots_in_keys() {
         let mut chest = new_default_chest("test_dots_in_keys");
-        let object_json = json!({"a.b.c": 1});
+        let document_json = json!({"a.b.c": 1});
 
         chest
             .lock_all_and_write(|transaction| {
-                let object = Object {
-                    id: transaction.main_bucket_insert(object_json.clone())?,
-                    value: object_json.clone(),
+                let document = Document {
+                    id: transaction.main_bucket_insert(document_json.clone())?,
+                    value: document_json.clone(),
                 };
                 assert_eq!(
-                    transaction.main_bucket_objects()?.collect::<Vec<_>>()?,
-                    vec![object.clone()]
+                    transaction.main_bucket_documents()?.collect::<Vec<_>>()?,
+                    vec![document.clone()]
                 );
                 Ok(())
             })
@@ -1451,7 +1461,7 @@ mod tests {
     #[test]
     fn test_simple() {
         let mut chest = new_default_chest("test_simple");
-        let object_json = json!({
+        let document_json = json!({
             "dict": {
                 "hello": ["number", 42, -4.2, 0.0],
                 "boolean": false
@@ -1462,27 +1472,27 @@ mod tests {
 
         chest
             .lock_all_and_write(|transaction| {
-                let object = Object {
-                    id: transaction.main_bucket_insert(object_json.clone())?,
-                    value: object_json.clone(),
+                let document = Document {
+                    id: transaction.main_bucket_insert(document_json.clone())?,
+                    value: document_json.clone(),
                 };
 
                 assert_eq!(
-                    transaction.main_bucket_objects()?.collect::<Vec<_>>()?,
-                    vec![object.clone()]
+                    transaction.main_bucket_documents()?.collect::<Vec<_>>()?,
+                    vec![document.clone()]
                 );
 
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict"))?
+                        .get(&document.id, &path_segments!("dict"))?
                         .unwrap(),
-                    object.value.as_object().unwrap().get("dict").unwrap()
+                    document.value.as_object().unwrap().get("dict").unwrap()
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict", "hello"))?
+                        .get(&document.id, &path_segments!("dict", "hello"))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
@@ -1495,9 +1505,9 @@ mod tests {
                 );
                 assert_eq!(
                     &transaction
-                        .get(&object.id, &path_segments!("dict", "boolean"))?
+                        .get(&document.id, &path_segments!("dict", "boolean"))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
@@ -1510,9 +1520,9 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 0))?
+                        .get(&document.id, &path_segments!("dict", "hello", 0))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
@@ -1527,9 +1537,9 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 1))?
+                        .get(&document.id, &path_segments!("dict", "hello", 1))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
@@ -1544,9 +1554,9 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 2))?
+                        .get(&document.id, &path_segments!("dict", "hello", 2))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
@@ -1561,9 +1571,9 @@ mod tests {
                 );
                 assert_eq!(
                     transaction
-                        .get(&object.id, &path_segments!("dict", "hello", 3))?
+                        .get(&document.id, &path_segments!("dict", "hello", 3))?
                         .unwrap(),
-                    object
+                    document
                         .value
                         .as_object()
                         .unwrap()
