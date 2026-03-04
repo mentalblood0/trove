@@ -7,9 +7,12 @@ pub extern crate fallible_iterator;
 pub extern crate paste;
 pub extern crate serde;
 
+pub use dream::bincode;
+
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
 )]
+#[bincode(crate = "bincode")]
 pub struct DocumentId {
     pub value: [u8; 16],
 }
@@ -65,6 +68,7 @@ pub struct Document {
 }
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
+#[bincode(crate = "bincode")]
 pub enum PathSegment {
     JsonObjectKey(String),
     JsonArrayIndex(u32),
@@ -121,6 +125,7 @@ pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
 }
 
 #[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
+#[bincode(crate = "bincode")]
 pub enum Value {
     Null,
     Integer(i64),
