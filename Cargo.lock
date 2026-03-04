@@ -112,7 +112,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#ef3188ce23133c65b7cf73dad0dd334a6548b726"
+source = "git+https://github.com/mentalblood0/dream#ca4b271638c5444302979e5a9e5a01c23a6052b1"
 dependencies = [
  "anyhow",
  "bincode",
