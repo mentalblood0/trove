@@ -1048,7 +1048,7 @@ macro_rules! path_segments {
     ( $( $seg:expr ),+ $(,)? ) => {
         vec![
             $(
-                crate::PathSegment::from($seg)
+                PathSegment::from($seg)
             ),+
         ]
     };
