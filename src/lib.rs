@@ -33,6 +33,22 @@ impl DocumentId {
     }
 }
 
+impl From<i64> for DocumentId {
+    fn from(i: i64) -> Self {
+        let mut result_raw = [0u8; 16];
+        result_raw[..8].copy_from_slice(&i.to_le_bytes());
+        Self { value: result_raw }
+    }
+}
+
+impl From<DocumentId> for i64 {
+    fn from(document_id: DocumentId) -> Self {
+        let mut document_id_bytes = [0u8; 8];
+        document_id_bytes.copy_from_slice(&document_id.value[..8]);
+        i64::from_le_bytes(document_id_bytes)
+    }
+}
+
 impl serde::Serialize for DocumentId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
