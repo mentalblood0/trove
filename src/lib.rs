@@ -8,6 +8,7 @@ pub extern crate paste;
 pub extern crate serde;
 
 pub use dream::bincode;
+pub use dream::xxhash_rust;
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,

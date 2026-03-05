@@ -8,7 +8,6 @@ dream = { git = "https://github.com/mentalblood0/dream" }
 anyhow = { version = "1.0.100", features = ["std", "backtrace"] }
 paste = { version = "1.0" }
 uuid = { version = "1.19", features = ["v7"] }
-xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 fallible-iterator = { version = "0.3", features = ["std"] }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
