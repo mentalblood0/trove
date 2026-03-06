@@ -819,11 +819,8 @@ macro_rules! define_chest {
                             let last_element_index_option = self
                                 .[<$bucket_name _last_element_index>](document_id, array_path)?;
                             let new_element_index = if let Some(last_element_index) = last_element_index_option { last_element_index + 1 } else { 0 };
-                            let push_path = array_path
-                                .iter()
-                                .cloned()
-                                .chain(vec![PathSegment::JsonArrayIndex(new_element_index)].into_iter())
-                                .collect::<Vec<_>>();
+                            let mut push_path = array_path.clone();
+                            push_path.push(PathSegment::JsonArrayIndex(new_element_index));
                             self.[<$bucket_name _update>](document_id.clone(), push_path, value)?;
                             Ok(new_element_index)
                         }
@@ -1157,7 +1154,7 @@ mod tests {
                                 let result =
                                     transaction.main_bucket_get(&document_id, &vec![])?.unwrap();
                                 assert_eq!(result, *document_value);
-                                let flatten_document = flatten(&vec![], &document_value, false)?;
+                                let flatten_document = flatten(&vec![], &document_value, true)?;
                                 for (pathvalue_index, (path, value)) in
                                     flatten_document.iter().enumerate()
                                 {
@@ -1271,18 +1268,17 @@ mod tests {
                                                         selected_document_id == document_id
                                                     }
                                                 ));
-                                                if flatten_document
-                                                    .get(pathvalue_index + 1)
-                                                    .is_none_or(|(next_path, _)| {
-                                                        next_path.starts_with(&base_path)
-                                                            && next_path.get(base_path.len())
-                                                                != Some(
-                                                                    &PathSegment::JsonArrayIndex(
-                                                                        current_array_index + 1,
-                                                                    ),
-                                                                )
-                                                    })
+                                                if let Some(PathSegment::JsonArrayIndex(
+                                                    path_last_index,
+                                                )) = path.last()
                                                 {
+                                                    let last_element_index_before_repush =
+                                                        transaction
+                                                            .main_bucket_last_element_index(
+                                                                document_id,
+                                                                &base_path,
+                                                            )?
+                                                            .unwrap();
                                                     transaction
                                                         .main_bucket_remove(document_id, path)
                                                         .unwrap();
@@ -1300,7 +1296,15 @@ mod tests {
                                                                 &base_path
                                                             )
                                                             .unwrap(),
-                                                        Some(*current_array_index),
+                                                        Some(
+                                                            if *path_last_index
+                                                                == last_element_index_before_repush
+                                                            {
+                                                                last_element_index_before_repush
+                                                            } else {
+                                                                last_element_index_before_repush + 1
+                                                            }
+                                                        ),
                                                     );
                                                     assert_eq!(
                                                         transaction
@@ -1311,6 +1315,19 @@ mod tests {
                                                             .unwrap(),
                                                         Some(value_as_json.clone())
                                                     );
+                                                    let mut new_path = base_path.clone();
+                                                    new_path.push(PathSegment::JsonArrayIndex(
+                                                        last_element_index_before_repush + 1,
+                                                    ));
+                                                    transaction.main_bucket_remove(
+                                                        document_id,
+                                                        &new_path,
+                                                    )?;
+                                                    transaction.main_bucket_update(
+                                                        document_id.clone(),
+                                                        path.clone(),
+                                                        value_as_json.clone(),
+                                                    )?;
                                                 }
                                             }
                                         }
@@ -1326,6 +1343,7 @@ mod tests {
                                                 None,
                                             )?
                                             .collect::<Vec<DocumentId>>()?;
+                                        println!("select by {value_as_json:?} -> {selected:?}");
                                         for selected_document_id in selected.iter() {
                                             assert_eq!(
                                                 transaction
