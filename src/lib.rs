@@ -353,17 +353,17 @@ macro_rules! define_chest {
                             if let Some(path_index) = path_index_option {
                                 let path_base = path[..path.len() - 1].to_vec();
                                 self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_serializable(&(IndexRecordType::Array, path_base.clone(), json_value.clone())).value,
+                                    value: Digest::of_serializable(&(IndexRecordType::Array, &path_base, &json_value)).value,
                                 }));
                                 self.array_digests
                                     .entry(*path_index)
                                     .or_insert(Vec::new())
                                     .push(dream::Object::Identified(dream::Id {
-                                        value: Digest::of_serializable(&(path_base.clone(), self.document_id.clone(), json_value.clone())).value,
+                                        value: Digest::of_serializable(&(&path_base, &self.document_id, &json_value)).value,
                                     }));
                             } else {
                                 self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_serializable(&(IndexRecordType::Direct, path.clone(), json_value.clone())).value,
+                                    value: Digest::of_serializable(&(IndexRecordType::Direct, path, &json_value)).value,
                                 }));
                             }
                             Ok(self)
@@ -511,7 +511,7 @@ macro_rules! define_chest {
                                     let mut result = Vec::new();
                                     for (index_record_type, path, value) in presention_conditions {
                                         result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_serializable(&(index_record_type.clone(), path.clone(), value.clone())).value,
+                                            value: Digest::of_serializable(&(index_record_type, path, &value)).value,
                                         }));
                                     }
                                     result
@@ -520,7 +520,7 @@ macro_rules! define_chest {
                                     let mut result = Vec::new();
                                     for (index_record_type, path, value) in absention_conditions {
                                         result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_serializable(&(index_record_type.clone(), path.clone(), value.clone())).value,
+                                            value: Digest::of_serializable(&(index_record_type, path, &value)).value,
                                         }));
                                     }
                                     result
