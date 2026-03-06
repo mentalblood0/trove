@@ -7,7 +7,7 @@ pub extern crate fallible_iterator;
 pub extern crate paste;
 pub extern crate serde;
 
-pub use dream::bincode;
+pub use bincode;
 pub use dream::xxhash_rust;
 
 #[derive(
@@ -84,7 +84,9 @@ pub struct Document {
     pub value: serde_json::Value,
 }
 
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq, serde::Serialize,
+)]
 #[bincode(crate = "bincode")]
 pub enum PathSegment {
     JsonObjectKey(String),
@@ -141,7 +143,7 @@ pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     }
 }
 
-#[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
+#[derive(bincode::Encode, bincode::Decode, Clone, Debug, serde::Serialize)]
 #[bincode(crate = "bincode")]
 pub enum Value {
     Null,
@@ -191,7 +193,7 @@ pub struct Digest {
 }
 
 #[repr(u8)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum IndexRecordType {
     Direct = 0,
     Array = 1,
@@ -204,39 +206,10 @@ impl Digest {
         }
     }
 
-    pub fn of_pathvalue(
-        index_record_type: IndexRecordType,
-        path: &Path,
-        value: &Value,
-    ) -> Result<Self> {
-        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
-            .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> =
-            Vec::with_capacity(2 + encoded_path.len() + 1 + encoded_value.len());
-        data.push(index_record_type as u8);
-        data.push(0u8);
-        data.extend_from_slice(&encoded_path);
-        data.push(0u8);
-        data.extend_from_slice(&encoded_value);
-        Ok(Self::of_data(&data))
-    }
-
-    pub fn of_path_document_id_and_value(
-        path: &Path,
-        object_id: &DocumentId,
-        value: &Value,
-    ) -> Result<Self> {
-        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
-            .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> =
-            Vec::with_capacity(encoded_path.len() + 1 + 16 + encoded_value.len());
-        data.extend_from_slice(&encoded_path);
-        data.push(0u8);
-        data.extend_from_slice(&object_id.value);
-        data.extend_from_slice(&encoded_value);
-        Ok(Self::of_data(&data))
+    pub fn of_serializable(serializable: &impl serde::Serialize) -> Self {
+        Self::of_data(
+            &bincode::serde::encode_to_vec(serializable, bincode::config::standard()).unwrap(),
+        )
     }
 }
 
@@ -271,7 +244,7 @@ macro_rules! define_chest {
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, fallible_iterator::FallibleIterator,
-                DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, IndexRecordType, nest, flatten
+                DocumentId, Document, Path, DocumentsIterator, FlatDocument, Digest, PathSegment, IndexRecordType, nest, flatten
             };
 
             paste! {
@@ -369,7 +342,7 @@ macro_rules! define_chest {
                             }
                         }
 
-                        fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
+                        fn push(&mut self, path: Path, json_value: &serde_json::Value) -> Result<&Self> {
                             let path_index_option = path.last().and_then(|last_segment| {
                                 if let PathSegment::JsonArrayIndex(path_index) = last_segment {
                                     Some(path_index)
@@ -380,39 +353,17 @@ macro_rules! define_chest {
                             if let Some(path_index) = path_index_option {
                                 let path_base = path[..path.len() - 1].to_vec();
                                 self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_pathvalue(IndexRecordType::Array, &path_base, &value.clone())
-                                        .with_context(|| {
-                                            format!(
-                                                "Can not compute array type digest for path {path_base:?} and value \
-                                                 {value:?}",
-                                            )
-                                        })?
-                                        .value,
+                                    value: Digest::of_serializable(&(IndexRecordType::Array, path_base.clone(), json_value.clone())).value,
                                 }));
                                 self.array_digests
                                     .entry(*path_index)
                                     .or_insert(Vec::new())
                                     .push(dream::Object::Identified(dream::Id {
-                                        value: Digest::of_path_document_id_and_value(&path_base, &self.document_id, &value)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute array type digest for path {path_base:?}, object \
-                                                     id {:?} and value {value:?}",
-                                                    self.document_id
-                                                )
-                                            })?
-                                            .value,
+                                        value: Digest::of_serializable(&(path_base.clone(), self.document_id.clone(), json_value.clone())).value,
                                     }));
                             } else {
                                 self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_pathvalue(IndexRecordType::Direct, &path, &value.clone())
-                                        .with_context(|| {
-                                            format!(
-                                                "Can not compute direct type digest for path {:?} and value {:?}",
-                                                path, value
-                                            )
-                                        })?
-                                        .value,
+                                    value: Digest::of_serializable(&(IndexRecordType::Direct, path.clone(), json_value.clone())).value,
                                 }));
                             }
                             Ok(self)
@@ -560,24 +511,7 @@ macro_rules! define_chest {
                                     let mut result = Vec::new();
                                     for (index_record_type, path, value) in presention_conditions {
                                         result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_pathvalue(
-                                                index_record_type.clone(),
-                                                &path,
-                                                &value.clone().try_into().with_context(|| {
-                                                    format!(
-                                                        "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where ({index_record_type:?}, \
-                                                         {path:?}, {value:?}) is present"
-                                                    )
-                                                })?,
-                                            )
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest of presention condition \
-                                                     ({index_record_type:?}), {path:?}, {value:?}"
-                                                )
-                                            })?
-                                            .value,
+                                            value: Digest::of_serializable(&(index_record_type.clone(), path.clone(), value.clone())).value,
                                         }));
                                     }
                                     result
@@ -586,24 +520,7 @@ macro_rules! define_chest {
                                     let mut result = Vec::new();
                                     for (index_record_type, path, value) in absention_conditions {
                                         result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_pathvalue(
-                                                index_record_type.clone(),
-                                                &path,
-                                                &value.clone().try_into().with_context(|| {
-                                                    format!(
-                                                        "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where ({index_record_type:?}, \
-                                                         {path:?}, {value:?}) is absent"
-                                                    )
-                                                })?,
-                                            )
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest of absention condition \
-                                                     ({index_record_type:?}), {path:?}, {value:?}"
-                                                )
-                                            })?
-                                            .value,
+                                            value: Digest::of_serializable(&(index_record_type.clone(), path.clone(), value.clone())).value,
                                         }));
                                     }
                                     result
@@ -742,19 +659,11 @@ macro_rules! define_chest {
                                 &self,
                                 document_id: &DocumentId,
                                 array_path: &Path,
-                                element: &Value,
+                                element: &serde_json::Value,
                             ) -> Result<bool> {
                                 self.index_transaction
                                     .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
-                                        value: Digest::of_path_document_id_and_value(array_path, document_id, element)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute array type digest for path {array_path:?}, \
-                                                     document id {:?} and value {element:?}",
-                                                    document_id
-                                                )
-                                            })?
-                                            .value,
+                                        value: Digest::of_serializable(&(array_path, document_id, element)).value,
                                     }))
                             }
 
@@ -762,21 +671,13 @@ macro_rules! define_chest {
                                 &self,
                                 document_id: &DocumentId,
                                 array_path: &Path,
-                                element: &Value,
+                                element: &serde_json::Value,
                             ) -> Result<Option<u32>> {
                                 Ok(self
                                     .index_transaction
                                     .[<$bucket_name _search>](
                                         &vec![dream::Object::Identified(dream::Id {
-                                            value: Digest::of_path_document_id_and_value(array_path, document_id, element)
-                                                .with_context(|| {
-                                                    format!(
-                                                        "Can not compute array type digest for path {array_path:?}, \
-                                                         document id {:?} and value {element:?}",
-                                                        document_id
-                                                    )
-                                                })?
-                                                .value,
+                                            value: Digest::of_serializable(&(array_path, document_id, element)).value,
                                         })],
                                         &vec![],
                                         None,
@@ -808,7 +709,7 @@ macro_rules! define_chest {
                                 .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
                             {
                                 index_batch
-                                    .push(internal_path.clone(), internal_value.clone())
+                                    .push(internal_path.clone(), &internal_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({internal_path:?}, {internal_value:?}) \
@@ -891,7 +792,7 @@ macro_rules! define_chest {
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
-                                    .push(current_path.clone(), current_value.clone())
+                                    .push(current_path.clone(), &current_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
@@ -1253,7 +1154,7 @@ mod tests {
                                                     transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &base_path,
-                                                        value
+                                                        &value_as_json
                                                     )?,
                                                     false
                                                 );
@@ -1299,7 +1200,7 @@ mod tests {
                                                     transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &base_path,
-                                                        value
+                                                        &value_as_json
                                                     )?,
                                                     true
                                                 );
@@ -1308,7 +1209,7 @@ mod tests {
                                                         .main_bucket_get_element_index(
                                                             document_id,
                                                             &base_path,
-                                                            value
+                                                            &value_as_json
                                                         )
                                                         .unwrap(),
                                                     Some(*current_array_index)

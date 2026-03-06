@@ -438,7 +438,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 [[package]]
 name = "saphyr-parser-bw"
 version = "0.0.609"
-source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#a4737f3a483422c80dce0bcf91264b7bf87ecf7f"
+source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#d83e734900d98244e8f8e348e3d32344e7b47222"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -470,7 +470,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.21"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#5d5184501b65f3b60cb7e808ee5129fb348a58a5"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#3d4105d81175d5f2196c956778377fa7fdb2fb87"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -562,6 +562,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "bincode",
  "dream",
  "fallible-iterator",
  "nanorand",
@@ -599,9 +600,9 @@ checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "uuid"
-version = "1.21.0"
+version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb"
+checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
