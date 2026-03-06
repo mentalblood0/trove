@@ -594,7 +594,7 @@ macro_rules! define_chest {
                                         })
                                     })
                                     .next()?
-                                    .or_else(|| if found_document { None } else { Some(0) }))
+                                    .or(None))
                             }
 
                             pub fn [<$bucket_name _last>](
@@ -816,17 +816,16 @@ macro_rules! define_chest {
                             array_path: &Path,
                             value: serde_json::Value,
                         ) -> Result<u32> {
-                            let last_element_index= self
-                                .[<$bucket_name _last_element_index>](document_id, array_path)?
-                                .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
-                            dbg!(&last_element_index);
+                            let last_element_index_option = self
+                                .[<$bucket_name _last_element_index>](document_id, array_path)?;
+                            let new_element_index = if let Some(last_element_index) = last_element_index_option { last_element_index + 1 } else { 0 };
                             let push_path = array_path
                                 .iter()
                                 .cloned()
-                                .chain(vec![PathSegment::JsonArrayIndex(last_element_index + 1)].into_iter())
+                                .chain(vec![PathSegment::JsonArrayIndex(new_element_index)].into_iter())
                                 .collect::<Vec<_>>();
                             self.[<$bucket_name _update>](document_id.clone(), push_path, value)?;
-                            Ok(last_element_index)
+                            Ok(new_element_index)
                         }
                     }
                 )*
@@ -1149,7 +1148,6 @@ mod tests {
                                     (transaction.main_bucket_insert(json.clone()).unwrap(), json)
                                 })
                                 .collect::<Vec<_>>();
-                            dbg!(&new_documents);
                             for (document_id, document_value) in new_documents.iter() {
                                 assert_eq!(
                                     transaction
@@ -1194,7 +1192,7 @@ mod tests {
                                                             &base_path
                                                         )
                                                         .unwrap(),
-                                                    Some(0)
+                                                    None
                                                 );
                                                 let selected = transaction
                                                     .main_bucket_select(
@@ -1295,7 +1293,6 @@ mod tests {
                                                             value_as_json.clone(),
                                                         )
                                                         .unwrap();
-                                                    dbg!(&document_id, &base_path);
                                                     assert_eq!(
                                                         transaction
                                                             .main_bucket_last_element_index(
@@ -1318,7 +1315,6 @@ mod tests {
                                             }
                                         }
                                     } else {
-                                        dbg!(&value_as_json);
                                         let selected = transaction
                                             .main_bucket_select(
                                                 &vec![(
