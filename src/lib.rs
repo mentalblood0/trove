@@ -93,6 +93,26 @@ pub enum PathSegment {
 
 pub type Path = Vec<PathSegment>;
 
+#[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
+#[bincode(crate = "bincode")]
+pub enum SearchPathSegment {
+    JsonObjectKey(String),
+    AnyJsonArrayIndex,
+}
+
+pub type SearchPath = Vec<SearchPathSegment>;
+
+pub fn new_search_path_from_path(path: Path) -> SearchPath {
+    path.into_iter()
+        .map(|path_segment| match path_segment {
+            PathSegment::JsonObjectKey(json_object_key) => {
+                SearchPathSegment::JsonObjectKey(json_object_key)
+            }
+            PathSegment::JsonArrayIndex(_) => SearchPathSegment::AnyJsonArrayIndex,
+        })
+        .collect::<Vec<_>>()
+}
+
 pub type FlatDocument = Vec<(Path, Value)>;
 
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
@@ -190,53 +210,12 @@ pub struct Digest {
     pub value: [u8; 16],
 }
 
-#[repr(u8)]
-#[derive(Clone, Debug)]
-pub enum IndexRecordType {
-    Direct = 0,
-    Array = 1,
-}
-
 impl Digest {
-    pub fn of_data(data: &Vec<u8>) -> Self {
-        Self {
-            value: xxhash_rust::xxh3::xxh3_128(data).to_le_bytes(),
-        }
-    }
-
-    pub fn of_pathvalue(
-        index_record_type: IndexRecordType,
-        path: &Path,
-        value: &Value,
-    ) -> Result<Self> {
-        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
-            .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> =
-            Vec::with_capacity(2 + encoded_path.len() + 1 + encoded_value.len());
-        data.push(index_record_type as u8);
-        data.push(0u8);
-        data.extend_from_slice(&encoded_path);
-        data.push(0u8);
-        data.extend_from_slice(&encoded_value);
-        Ok(Self::of_data(&data))
-    }
-
-    pub fn of_path_document_id_and_value(
-        path: &Path,
-        object_id: &DocumentId,
-        value: &Value,
-    ) -> Result<Self> {
-        let encoded_path = bincode::encode_to_vec(path, bincode::config::standard())?;
-        let encoded_value = bincode::encode_to_vec(value, bincode::config::standard())
-            .with_context(|| format!("Can not binary encode value {value:?}"))?;
-        let mut data: Vec<u8> =
-            Vec::with_capacity(encoded_path.len() + 1 + 16 + encoded_value.len());
-        data.extend_from_slice(&encoded_path);
-        data.push(0u8);
-        data.extend_from_slice(&object_id.value);
-        data.extend_from_slice(&encoded_value);
-        Ok(Self::of_data(&data))
+    pub fn new(search_path: &SearchPath, value: &Value) -> Result<Self> {
+        let data = bincode::encode_to_vec((search_path, value), bincode::config::standard())?;
+        Ok(Self {
+            value: xxhash_rust::xxh3::xxh3_128(&data).to_le_bytes(),
+        })
     }
 }
 
@@ -265,13 +244,14 @@ macro_rules! define_chest {
     }) => {
         #[allow(dead_code)]
         pub mod $chest_name {
-            use std::{ops::Bound, collections::HashMap};
+            use std::{ops::Bound, collections::HashSet};
 
             use $crate::{
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, fallible_iterator::FallibleIterator,
-                DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, IndexRecordType, nest, flatten
+                DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, nest, flatten,
+                new_search_path_from_path, SearchPath
             };
 
             paste! {
@@ -356,106 +336,48 @@ macro_rules! define_chest {
                     #[derive(Debug, Clone)]
                     struct [<$bucket_name:camel IndexBatch>] {
                         document_id: DocumentId,
-                        digests: Vec<dream::Object>,
-                        array_digests: HashMap<u32, Vec<dream::Object>>,
+                        digests: HashSet<dream::Object>,
                     }
 
                     impl [<$bucket_name:camel IndexBatch>] {
                         fn new(document_id: DocumentId) -> Self {
                             Self {
                                 document_id,
-                                digests: Vec::new(),
-                                array_digests: HashMap::new(),
+                                digests: HashSet::new(),
                             }
                         }
 
                         fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
-                            let path_index_option = path.last().and_then(|last_segment| {
-                                if let PathSegment::JsonArrayIndex(path_index) = last_segment {
-                                    Some(path_index)
-                                } else {
-                                    None
-                                }
-                            });
-                            if let Some(path_index) = path_index_option {
-                                let path_base = path[..path.len() - 1].to_vec();
-                                self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_pathvalue(IndexRecordType::Array, &path_base, &value.clone())
-                                        .with_context(|| {
-                                            format!(
-                                                "Can not compute array type digest for path {path_base:?} and value \
-                                                 {value:?}",
-                                            )
-                                        })?
-                                        .value,
-                                }));
-                                self.array_digests
-                                    .entry(*path_index)
-                                    .or_insert(Vec::new())
-                                    .push(dream::Object::Identified(dream::Id {
-                                        value: Digest::of_path_document_id_and_value(&path_base, &self.document_id, &value)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute array type digest for path {path_base:?}, object \
-                                                     id {:?} and value {value:?}",
-                                                    self.document_id
-                                                )
-                                            })?
-                                            .value,
-                                    }));
-                            } else {
-                                self.digests.push(dream::Object::Identified(dream::Id {
-                                    value: Digest::of_pathvalue(IndexRecordType::Direct, &path, &value.clone())
-                                        .with_context(|| {
-                                            format!(
-                                                "Can not compute direct type digest for path {:?} and value {:?}",
-                                                path, value
-                                            )
-                                        })?
-                                        .value,
-                                }));
-                            }
+                            let search_path = new_search_path_from_path(path);
+                            self.digests.insert(dream::Object::Identified(dream::Id {
+                                value: Digest::new(&search_path, &value.clone())
+                                    .with_context(|| {
+                                        format!(
+                                            "Can not compute digest for search path {:?} and value {:?}",
+                                            search_path, value
+                                        )
+                                    })?
+                                    .value,
+                            }));
                             Ok(self)
-                        }
-
-                        fn u32_to_dream_id(input: u32) -> dream::Id {
-                            let mut value = [0u8; 16];
-                            value[12..].copy_from_slice(&input.to_be_bytes());
-                            dream::Id { value }
-                        }
-
-                        fn dream_id_to_u32(id: dream::Id) -> u32 {
-                            u32::from_be_bytes(id.value[12..16].try_into().unwrap())
-                        }
-
-                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &Vec<dream::Object>)> + '_> {
-                            Box::new(
-                                vec![(
-                                    dream::Id {
-                                        value: self.document_id.value,
-                                    },
-                                    &self.digests,
-                                )]
-                                .into_iter()
-                                .chain(self.array_digests.iter().map(
-                                    |(path_index, path_index_paths_digests)| {
-                                        (Self::u32_to_dream_id(*path_index), path_index_paths_digests)
-                                    },
-                                )),
-                            )
                         }
 
                         fn flush_insert(
                             &self,
                             index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
                         ) -> Result<&Self> {
-                            for (dream_id, tags) in self.iter() {
-                                index_transaction
-                                    .[<$bucket_name _insert>](&dream::Object::Identified(dream_id.clone()), tags)
-                                    .with_context(|| {
-                                        format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
-                                    })?;
-                            }
+                            let dream_id = &dream::Object::Identified(
+                                dream::Id {
+                                    value: self.document_id.value,
+                                }
+                            );
+                            let tags = &self.digests;
+                            index_transaction
+                                .[<$bucket_name _insert>](
+                                    dream_id, tags
+                                ).with_context(|| {
+                                    format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
+                                })?;
                             Ok(self)
                         }
 
@@ -463,16 +385,21 @@ macro_rules! define_chest {
                             &self,
                             index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
                         ) -> Result<&Self> {
-                            for (dream_id, tags) in self.iter() {
-                                index_transaction
-                                    .[<$bucket_name _remove_tags_from_object>](&dream::Object::Identified(dream_id.clone()), tags)
-                                    .with_context(|| {
-                                        format!(
-                                            "Can not remove tags {tags:?} from object with id {dream_id:?} in dream \
-                                             index"
-                                        )
-                                    })?;
-                            }
+                            let dream_id = &dream::Object::Identified(
+                                dream::Id {
+                                    value: self.document_id.value,
+                                }
+                            );
+                            let tags = &self.digests;
+                            index_transaction
+                                .[<$bucket_name _remove_tags_from_object>](
+                                    dream_id, tags
+                                ).with_context(|| {
+                                    format!(
+                                        "Can not remove tags {tags:?} from object with id {dream_id:?} in dream \
+                                         index"
+                                    )
+                                })?;
                             Ok(self)
                         }
                     }
@@ -552,29 +479,28 @@ macro_rules! define_chest {
 
                             pub fn [<$bucket_name _select>](
                                 &'a self,
-                                presention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
-                                absention_conditions: &Vec<(IndexRecordType, Path, serde_json::Value)>,
+                                presention_conditions: &Vec<(SearchPath, serde_json::Value)>,
+                                absention_conditions: &Vec<(SearchPath, serde_json::Value)>,
                                 start_after_document: Option<DocumentId>,
                             ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
                                 let present_ids = {
-                                    let mut result = Vec::new();
-                                    for (index_record_type, path, value) in presention_conditions {
-                                        result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_pathvalue(
-                                                index_record_type.clone(),
-                                                &path,
+                                    let mut result = HashSet::new();
+                                    for (search_path, value) in presention_conditions {
+                                        result.insert(dream::Object::Identified(dream::Id {
+                                            value: Digest::new(
+                                                &search_path,
                                                 &value.clone().try_into().with_context(|| {
                                                     format!(
                                                         "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where ({index_record_type:?}, \
-                                                         {path:?}, {value:?}) is present"
+                                                         value so to select documents where (\
+                                                         {search_path:?}, {value:?}) is present"
                                                     )
                                                 })?,
                                             )
                                             .with_context(|| {
                                                 format!(
                                                     "Can not compute digest of presention condition \
-                                                     ({index_record_type:?}), {path:?}, {value:?}"
+                                                     ({search_path:?}, {value:?}"
                                                 )
                                             })?
                                             .value,
@@ -583,24 +509,23 @@ macro_rules! define_chest {
                                     result
                                 };
                                 let absent_ids = {
-                                    let mut result = Vec::new();
-                                    for (index_record_type, path, value) in absention_conditions {
-                                        result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::of_pathvalue(
-                                                index_record_type.clone(),
-                                                &path,
+                                    let mut result = HashSet::new();
+                                    for (search_path, value) in absention_conditions {
+                                        result.insert(dream::Object::Identified(dream::Id {
+                                            value: Digest::new(
+                                                &search_path,
                                                 &value.clone().try_into().with_context(|| {
                                                     format!(
                                                         "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where ({index_record_type:?}, \
-                                                         {path:?}, {value:?}) is absent"
+                                                         value so to select documents where (\
+                                                         {search_path:?}, {value:?}) is present"
                                                     )
                                                 })?,
                                             )
                                             .with_context(|| {
                                                 format!(
-                                                    "Can not compute digest of absention condition \
-                                                     ({index_record_type:?}), {path:?}, {value:?}"
+                                                    "Can not compute digest of presention condition \
+                                                     ({search_path:?}, {value:?}"
                                                 )
                                             })?
                                             .value,
@@ -736,53 +661,6 @@ macro_rules! define_chest {
                                     })
                                     .next()?
                                     .is_some())
-                            }
-
-                            pub fn [<$bucket_name _contains_element>](
-                                &self,
-                                document_id: &DocumentId,
-                                array_path: &Path,
-                                element: &Value,
-                            ) -> Result<bool> {
-                                self.index_transaction
-                                    .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
-                                        value: Digest::of_path_document_id_and_value(array_path, document_id, element)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute array type digest for path {array_path:?}, \
-                                                     document id {:?} and value {element:?}",
-                                                    document_id
-                                                )
-                                            })?
-                                            .value,
-                                    }))
-                            }
-
-                            pub fn [<$bucket_name _get_element_index>](
-                                &self,
-                                document_id: &DocumentId,
-                                array_path: &Path,
-                                element: &Value,
-                            ) -> Result<Option<u32>> {
-                                Ok(self
-                                    .index_transaction
-                                    .[<$bucket_name _search>](
-                                        &vec![dream::Object::Identified(dream::Id {
-                                            value: Digest::of_path_document_id_and_value(array_path, document_id, element)
-                                                .with_context(|| {
-                                                    format!(
-                                                        "Can not compute array type digest for path {array_path:?}, \
-                                                         document id {:?} and value {element:?}",
-                                                        document_id
-                                                    )
-                                                })?
-                                                .value,
-                                        })],
-                                        &vec![],
-                                        None,
-                                    )?
-                                    .next()?
-                                    .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id)))
                             }
                         }
                     )*
@@ -1062,10 +940,33 @@ impl From<usize> for PathSegment {
 
 #[macro_export]
 macro_rules! path_segments {
-    ( $( $seg:expr ),+ $(,)? ) => {
+    ( $( $path_segment:expr ),+ $(,)? ) => {
         vec![
             $(
-                $crate::PathSegment::from($seg)
+                $crate::PathSegment::from($path_segment)
+            ),+
+        ]
+    };
+}
+
+impl From<String> for SearchPathSegment {
+    fn from(s: String) -> Self {
+        SearchPathSegment::JsonObjectKey(s)
+    }
+}
+
+impl From<()> for SearchPathSegment {
+    fn from(_: ()) -> Self {
+        SearchPathSegment::AnyJsonArrayIndex
+    }
+}
+
+#[macro_export]
+macro_rules! search_path_segments {
+    ( $( $path_segment:expr ),+ $(,)? ) => {
+        vec![
+            $(
+                $crate::SearchPathSegment::from($path_segment)
             ),+
         ]
     };
@@ -1250,14 +1151,6 @@ mod tests {
                                         match last_path_segment {
                                             PathSegment::JsonObjectKey(_) => {
                                                 assert_eq!(
-                                                    transaction.main_bucket_contains_element(
-                                                        document_id,
-                                                        &base_path,
-                                                        value
-                                                    )?,
-                                                    false
-                                                );
-                                                assert_eq!(
                                                     transaction
                                                         .main_bucket_last_element_index(
                                                             document_id,
@@ -1269,8 +1162,7 @@ mod tests {
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            IndexRecordType::Direct,
-                                                            path.clone(),
+                                                            new_search_path_from_path(path.clone()),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
@@ -1295,29 +1187,10 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
-                                                assert_eq!(
-                                                    transaction.main_bucket_contains_element(
-                                                        document_id,
-                                                        &base_path,
-                                                        value
-                                                    )?,
-                                                    true
-                                                );
-                                                assert_eq!(
-                                                    transaction
-                                                        .main_bucket_get_element_index(
-                                                            document_id,
-                                                            &base_path,
-                                                            value
-                                                        )
-                                                        .unwrap(),
-                                                    Some(*current_array_index)
-                                                );
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            IndexRecordType::Array,
-                                                            base_path.clone(),
+                                                            new_search_path_from_path(path.clone()),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
@@ -1389,11 +1262,7 @@ mod tests {
                                     } else {
                                         let selected = transaction
                                             .main_bucket_select(
-                                                &vec![(
-                                                    IndexRecordType::Direct,
-                                                    vec![],
-                                                    value_as_json.clone(),
-                                                )],
+                                                &vec![(vec![], value_as_json.clone())],
                                                 &vec![],
                                                 None,
                                             )?

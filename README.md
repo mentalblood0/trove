@@ -11,6 +11,6 @@ An all-indexing document database for JSON-structured data. Built on top of [dre
 - immediately indexes all inserted data, maintains index automatically
 - stores documents flattened, avoiding excessive overwrites on updates
 - supports RAM-friendly searches by multiple path-value pairs
-- implements efficient array operations `last`, `last_element_index`, `contains_element`, `push` and `get_element_index`
+- implements efficient array operations `last`, `last_element_index` and `push`
 - can have multiple documents spaces ('buckets') for search optimization, transaction can access all the buckets
-- use UUID v7 for documents yet can also use manually provided identifiers
+- uses UUID v7 for documents yet can also use manually provided identifiers
