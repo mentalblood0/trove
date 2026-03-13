@@ -233,6 +233,10 @@ macro_rules! define_chest {
         )*
     ) {
         $(
+            $additional_index_name:ident
+        )*
+    } {
+        $(
             $additional_schema_name:ident {
                 $(
                     $table_name:ident<$key_type:ty, $value_type:ty>
@@ -257,6 +261,7 @@ macro_rules! define_chest {
             paste! {
                 dream::define_index!(trove_database(
                     $( $bucket_name ),*
+                    $( $additional_index_name ),*
                 ) {
                     data {
                         $(
@@ -988,6 +993,7 @@ mod tests {
         main_bucket
         another_bucket
     ) {
+    } {
     } use {
     });
 
