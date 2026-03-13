@@ -260,8 +260,8 @@ macro_rules! define_chest {
 
             paste! {
                 dream::define_index!(trove_database(
-                    $( $bucket_name ),*
-                    $( $additional_index_name ),*
+                    $( $bucket_name )*
+                    $( $additional_index_name )*
                 ) {
                     data {
                         $(

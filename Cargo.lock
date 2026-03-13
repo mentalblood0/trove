@@ -112,7 +112,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#cd9409af1d1f4f1a646a9099625feda0a93316a6"
+source = "git+https://github.com/mentalblood0/dream#c4cf79a71c3b1e48cebbc1ff6e59ded5664d67d2"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -470,7 +470,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.21"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#fb8b5c5b266eeb83c07b6a98847977e5cc4985ca"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#9f0a7bf8120c405c631a123aa2c7f10dd0968b35"
 dependencies = [
  "ahash",
  "annotate-snippets",
