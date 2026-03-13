@@ -960,6 +960,12 @@ impl From<String> for SearchPathSegment {
     }
 }
 
+impl From<&str> for SearchPathSegment {
+    fn from(s: &str) -> Self {
+        SearchPathSegment::JsonObjectKey(s.to_string())
+    }
+}
+
 impl From<()> for SearchPathSegment {
     fn from(_: ()) -> Self {
         SearchPathSegment::AnyJsonArrayIndex
