@@ -211,8 +211,15 @@ pub struct Digest {
 }
 
 impl Digest {
-    pub fn new(search_path: &SearchPath, value: &Value) -> Result<Self> {
-        let data = bincode::encode_to_vec((search_path, value), bincode::config::standard())?;
+    pub fn new(
+        document_id: Option<&DocumentId>,
+        search_path: &SearchPath,
+        value: &Value,
+    ) -> Result<Self> {
+        let data = bincode::encode_to_vec(
+            (document_id, search_path, value),
+            bincode::config::standard(),
+        )?;
         Ok(Self {
             value: xxhash_rust::xxh3::xxh3_128(&data).to_le_bytes(),
         })
@@ -248,7 +255,7 @@ macro_rules! define_chest {
     }) => {
         #[allow(dead_code)]
         pub mod $chest_name {
-            use std::{ops::Bound, collections::HashSet};
+            use std::{ops::Bound, collections::{HashSet, HashMap}};
 
             use $crate::{
                 serde::{Serialize, Deserialize},
@@ -342,6 +349,7 @@ macro_rules! define_chest {
                     struct [<$bucket_name:camel IndexBatch>] {
                         document_id: DocumentId,
                         digests: HashSet<dream::Object>,
+                        array_digests: HashMap<u32, HashSet<dream::Object>>,
                     }
 
                     impl [<$bucket_name:camel IndexBatch>] {
@@ -349,40 +357,82 @@ macro_rules! define_chest {
                             Self {
                                 document_id,
                                 digests: HashSet::new(),
+                                array_digests: HashMap::new(),
                             }
                         }
 
                         fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
-                            let search_path = new_search_path_from_path(path);
+                            let path_index_option = path.last().clone().and_then(|last_segment| {
+                                if let PathSegment::JsonArrayIndex(path_index) = last_segment {
+                                    Some(path_index)
+                                } else {
+                                    None
+                                }
+                            });
+                            let search_path = new_search_path_from_path(path.clone());
+                            if let Some(path_index) = path_index_option {
+                                self.array_digests
+                                    .entry(*path_index)
+                                    .or_insert(HashSet::new())
+                                    .insert(dream::Object::Identified(dream::Id {
+                                        value: Digest::new(Some(&self.document_id), &search_path, &value)
+                                            .with_context(|| {
+                                                format!(
+                                                    "Can not compute digest for document id {:?}, search path {search_path:?} and value {value:?}",
+                                                    self.document_id
+                                                )
+                                            })?
+                                            .value,
+                                    }));
+                            }
                             self.digests.insert(dream::Object::Identified(dream::Id {
-                                value: Digest::new(&search_path, &value.clone())
+                                value: Digest::new(None, &search_path, &value)
                                     .with_context(|| {
-                                        format!(
-                                            "Can not compute digest for search path {:?} and value {:?}",
-                                            search_path, value
-                                        )
+                                        format!("Can not compute digest for search path {:?} and value {:?}", search_path, value)
                                     })?
                                     .value,
                             }));
                             Ok(self)
                         }
 
+                        fn u32_to_dream_id(input: u32) -> dream::Id {
+                            let mut value = [0u8; 16];
+                            value[12..].copy_from_slice(&input.to_be_bytes());
+                            dream::Id { value }
+                        }
+
+                        fn dream_id_to_u32(id: dream::Id) -> u32 {
+                            u32::from_be_bytes(id.value[12..16].try_into().unwrap())
+                        }
+
+                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &HashSet<dream::Object>)> + '_> {
+                            Box::new(
+                                vec![(
+                                    dream::Id {
+                                        value: self.document_id.value,
+                                    },
+                                    &self.digests,
+                                )]
+                                .into_iter()
+                                .chain(self.array_digests.iter().map(
+                                    |(path_index, path_index_paths_digests)| {
+                                        (Self::u32_to_dream_id(*path_index), path_index_paths_digests)
+                                    },
+                                )),
+                            )
+                        }
+
                         fn flush_insert(
                             &self,
                             index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
                         ) -> Result<&Self> {
-                            let dream_id = &dream::Object::Identified(
-                                dream::Id {
-                                    value: self.document_id.value,
-                                }
-                            );
-                            let tags = &self.digests;
-                            index_transaction
-                                .[<$bucket_name _insert>](
-                                    dream_id, tags
-                                ).with_context(|| {
-                                    format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
-                                })?;
+                            for (dream_id, tags) in self.iter() {
+                                index_transaction
+                                    .[<$bucket_name _insert>](&dream::Object::Identified(dream_id.clone()), tags)
+                                    .with_context(|| {
+                                        format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
+                                    })?;
+                            }
                             Ok(self)
                         }
 
@@ -390,21 +440,13 @@ macro_rules! define_chest {
                             &self,
                             index_transaction: &mut trove_database::WriteTransaction<'_, '_>,
                         ) -> Result<&Self> {
-                            let dream_id = &dream::Object::Identified(
-                                dream::Id {
-                                    value: self.document_id.value,
-                                }
-                            );
-                            let tags = &self.digests;
-                            index_transaction
-                                .[<$bucket_name _remove_tags_from_object>](
-                                    dream_id, tags
-                                ).with_context(|| {
-                                    format!(
-                                        "Can not remove tags {tags:?} from object with id {dream_id:?} in dream \
-                                         index"
-                                    )
-                                })?;
+                            for (dream_id, tags) in self.iter() {
+                                index_transaction
+                                    .[<$bucket_name _remove_tags_from_object>](&dream::Object::Identified(dream_id.clone()), tags)
+                                    .with_context(|| {
+                                        format!("Can not remove tags {tags:?} from object with id {dream_id:?} in dream index")
+                                    })?;
+                            }
                             Ok(self)
                         }
                     }
@@ -493,6 +535,7 @@ macro_rules! define_chest {
                                     for (search_path, value) in presention_conditions {
                                         result.insert(dream::Object::Identified(dream::Id {
                                             value: Digest::new(
+                                                None,
                                                 &search_path,
                                                 &value.clone().try_into().with_context(|| {
                                                     format!(
@@ -518,6 +561,7 @@ macro_rules! define_chest {
                                     for (search_path, value) in absention_conditions {
                                         result.insert(dream::Object::Identified(dream::Id {
                                             value: Digest::new(
+                                                None,
                                                 &search_path,
                                                 &value.clone().try_into().with_context(|| {
                                                     format!(
@@ -666,6 +710,52 @@ macro_rules! define_chest {
                                     })
                                     .next()?
                                     .is_some())
+                            }
+
+                            pub fn [<$bucket_name _contains_element>](
+                                &self,
+                                document_id: &DocumentId,
+                                search_path: &SearchPath,
+                                element: &Value,
+                            ) -> Result<bool> {
+                                self.index_transaction
+                                    .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
+                                        value: Digest::new(Some(document_id), search_path, element)
+                                            .with_context(|| {
+                                                format!(
+                                                    "Can not compute digest for search path {search_path:?}, \
+                                                     document id {document_id:?} and value {element:?}",
+                                                )
+                                            })?
+                                            .value,
+                                    }))
+                            }
+
+                            pub fn [<$bucket_name _get_element_index>](
+                                &self,
+                                document_id: &DocumentId,
+                                path: &SearchPath,
+                                element: &Value,
+                            ) -> Result<Option<u32>> {
+                                Ok(self
+                                    .index_transaction
+                                    .[<$bucket_name _search>](
+                                        &[dream::Object::Identified(dream::Id {
+                                            value: Digest::new(Some(document_id), path, element)
+                                                .with_context(|| {
+                                                    format!(
+                                                        "Can not compute array type digest for path {path:?}, \
+                                                         document id {:?} and value {element:?}",
+                                                        document_id
+                                                    )
+                                                })?
+                                                .value,
+                                        })].into(),
+                                        &[].into(),
+                                        None,
+                                    )?
+                                    .next()?
+                                    .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id)))
                             }
                         }
                     )*
