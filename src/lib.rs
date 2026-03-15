@@ -257,7 +257,7 @@ macro_rules! define_chest {
     }) => {
         #[allow(dead_code)]
         pub mod $chest_name {
-            use std::{ops::Bound, collections::{HashSet, HashMap}};
+            use std::{ops::Bound, collections::HashMap};
 
             use $crate::{
                 serde::{Serialize, Deserialize},
@@ -350,18 +350,24 @@ macro_rules! define_chest {
                     #[derive(Debug, Clone)]
                     struct [<$bucket_name:camel IndexBatch>] {
                         document_id: DocumentId,
-                        digests: HashSet<dream::Object>,
-                        array_digests: HashMap<u32, HashSet<dream::Object>>,
+                        digests: Vec<dream::Object>,
+                        array_digests: HashMap<u32, Vec<dream::Object>>,
                     }
 
                     impl [<$bucket_name:camel IndexBatch>] {
                         fn new(document_id: DocumentId) -> Self {
                             Self {
                                 document_id,
-                                digests: HashSet::new(),
+                                digests: Vec::new(),
                                 array_digests: HashMap::new(),
                             }
                         }
+
+                        // fn push_array(&mut self, path: Path, array: &Vec<serde_json::Value>) -> Result<&Self> {
+                        //     for element in array.iter() {
+
+                        //     }
+                        // }
 
                         fn push_simple_value(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
                             let path_index_option = path.last().cloned().and_then(|last_segment| {
@@ -375,8 +381,8 @@ macro_rules! define_chest {
                             if let Some(path_index) = path_index_option {
                                 self.array_digests
                                     .entry(path_index)
-                                    .or_insert(HashSet::new())
-                                    .insert(dream::Object::Identified(dream::Id {
+                                    .or_insert(Vec::new())
+                                    .push(dream::Object::Identified(dream::Id {
                                         value: Digest::new(Some(&self.document_id), &search_path, &value)
                                             .with_context(|| {
                                                 format!(
@@ -387,7 +393,7 @@ macro_rules! define_chest {
                                             .value,
                                     }));
                             }
-                            self.digests.insert(dream::Object::Identified(dream::Id {
+                            self.digests.push(dream::Object::Identified(dream::Id {
                                 value: Digest::new(None, &search_path, &value)
                                     .with_context(|| {
                                         format!("Can not compute digest for search path {:?} and value {:?}", search_path, value)
@@ -407,7 +413,7 @@ macro_rules! define_chest {
                             u32::from_be_bytes(id.value[12..16].try_into().unwrap())
                         }
 
-                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &HashSet<dream::Object>)> + '_> {
+                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &Vec<dream::Object>)> + '_> {
                             Box::new(
                                 vec![(
                                     dream::Id {
@@ -533,9 +539,9 @@ macro_rules! define_chest {
                                 start_after_document: Option<DocumentId>,
                             ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
                                 let present_ids = {
-                                    let mut result = HashSet::new();
+                                    let mut result = Vec::new();
                                     for (search_path, value) in presention_conditions {
-                                        result.insert(dream::Object::Identified(dream::Id {
+                                        result.push(dream::Object::Identified(dream::Id {
                                             value: Digest::new(
                                                 None,
                                                 &search_path,
@@ -559,9 +565,9 @@ macro_rules! define_chest {
                                     result
                                 };
                                 let absent_ids = {
-                                    let mut result = HashSet::new();
+                                    let mut result = Vec::new();
                                     for (search_path, value) in absention_conditions {
-                                        result.insert(dream::Object::Identified(dream::Id {
+                                        result.push(dream::Object::Identified(dream::Id {
                                             value: Digest::new(
                                                 None,
                                                 &search_path,

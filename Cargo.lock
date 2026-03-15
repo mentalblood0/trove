@@ -37,9 +37,9 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anyhow"
@@ -112,7 +112,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#c4cf79a71c3b1e48cebbc1ff6e59ded5664d67d2"
+source = "git+https://github.com/mentalblood0/dream#fd130d1b6e213cfb797608da2565fb078d02b664"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -437,8 +437,8 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "saphyr-parser-bw"
-version = "0.0.609"
-source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#f199e90aa0981ad05eb05803c1df2b30a3a314a5"
+version = "0.0.610"
+source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#2f6bfa10691da6b838902ee78814724f6122b5d9"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -470,7 +470,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.21"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#9f0a7bf8120c405c631a123aa2c7f10dd0968b35"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#313ebd652f12a5bf4218dd4b1a4542b1237d2c35"
 dependencies = [
  "ahash",
  "annotate-snippets",
