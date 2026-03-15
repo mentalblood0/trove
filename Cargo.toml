@@ -12,6 +12,7 @@ fallible-iterator = { version = "0.3", features = ["std"] }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["std", "unbounded_depth"] }
+bincode = { version = "2.0.1", features = ["serde"] }
 
 [dev-dependencies]
 nanorand = "0.8"

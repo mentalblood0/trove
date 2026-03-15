@@ -93,7 +93,9 @@ pub enum PathSegment {
 
 pub type Path = Vec<PathSegment>;
 
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq, serde::Serialize,
+)]
 #[bincode(crate = "bincode")]
 pub enum SearchPathSegment {
     JsonObjectKey(String),
@@ -214,9 +216,9 @@ impl Digest {
     pub fn new(
         document_id: Option<&DocumentId>,
         search_path: &SearchPath,
-        value: &Value,
+        value: &serde_json::Value,
     ) -> Result<Self> {
-        let data = bincode::encode_to_vec(
+        let data = bincode::serde::encode_to_vec(
             (document_id, search_path, value),
             bincode::config::standard(),
         )?;
@@ -261,7 +263,7 @@ macro_rules! define_chest {
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, fallible_iterator::FallibleIterator,
-                DocumentId, Document, Path, Value, DocumentsIterator, FlatDocument, Digest, PathSegment, nest, flatten,
+                DocumentId, Document, Path, DocumentsIterator, FlatDocument, Digest, PathSegment, nest, flatten,
                 new_search_path_from_path, SearchPath
             };
 
@@ -361,18 +363,18 @@ macro_rules! define_chest {
                             }
                         }
 
-                        fn push(&mut self, path: Path, value: Value) -> Result<&Self> {
-                            let path_index_option = path.last().clone().and_then(|last_segment| {
+                        fn push_simple_value(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
+                            let path_index_option = path.last().cloned().and_then(|last_segment| {
                                 if let PathSegment::JsonArrayIndex(path_index) = last_segment {
                                     Some(path_index)
                                 } else {
                                     None
                                 }
                             });
-                            let search_path = new_search_path_from_path(path.clone());
+                            let search_path = new_search_path_from_path(path);
                             if let Some(path_index) = path_index_option {
                                 self.array_digests
-                                    .entry(*path_index)
+                                    .entry(path_index)
                                     .or_insert(HashSet::new())
                                     .insert(dream::Object::Identified(dream::Id {
                                         value: Digest::new(Some(&self.document_id), &search_path, &value)
@@ -716,7 +718,7 @@ macro_rules! define_chest {
                                 &self,
                                 document_id: &DocumentId,
                                 search_path: &SearchPath,
-                                element: &Value,
+                                element: &serde_json::Value,
                             ) -> Result<bool> {
                                 self.index_transaction
                                     .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
@@ -735,7 +737,7 @@ macro_rules! define_chest {
                                 &self,
                                 document_id: &DocumentId,
                                 path: &SearchPath,
-                                element: &Value,
+                                element: &serde_json::Value,
                             ) -> Result<Option<u32>> {
                                 Ok(self
                                     .index_transaction
@@ -781,7 +783,7 @@ macro_rules! define_chest {
                                 .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
                             {
                                 index_batch
-                                    .push(internal_path.clone(), internal_value.clone())
+                                    .push_simple_value(internal_path.clone(), internal_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({internal_path:?}, {internal_value:?}) \
@@ -864,7 +866,7 @@ macro_rules! define_chest {
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
-                                    .push(current_path.clone(), current_value.clone())
+                                    .push_simple_value(current_path.clone(), current_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
