@@ -117,6 +117,60 @@ pub fn new_search_path_from_path(path: Path) -> SearchPath {
 
 pub type FlatDocument = Vec<(Path, Value)>;
 
+pub fn flatten_to(path: Path, value: &serde_json::Value, result: &mut FlatDocument) -> Result<()> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, internal_value) in map {
+                let internal_path = path
+                    .iter()
+                    .cloned()
+                    .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
+                    .collect::<Path>();
+                flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    format!("Can not get flat representation of value {internal_value:?} part")
+                })?;
+            }
+        }
+        serde_json::Value::Array(array) => {
+            for (internal_value_index, internal_value) in array.iter().enumerate() {
+                let internal_path = path
+                    .iter()
+                    .cloned()
+                    .chain(
+                        vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
+                    )
+                    .collect::<Path>();
+                flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    format!(
+                        "Can not merge flat representation of value {internal_value:?} part into \
+                         {result:?}"
+                    )
+                })?;
+            }
+        }
+        _ => {
+            result.push((
+                path,
+                (*value).clone().try_into().with_context(|| {
+                    format!("Can not convert json value {value:?} into database storable value")
+                })?,
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn flatten(path: &Path, value: &serde_json::Value) -> Result<FlatDocument> {
+    let mut result = FlatDocument::new();
+    flatten_to(path.clone(), value, &mut result).with_context(|| {
+        format!(
+            "Can not merge flat representation of value {value:?} part at path {path:?} into \
+             {result:?}"
+        )
+    })?;
+    Ok(result)
+}
+
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     if flat_document.is_empty() {
         Ok(None)
@@ -362,12 +416,6 @@ macro_rules! define_chest {
                                 array_digests: HashMap::new(),
                             }
                         }
-
-                        // fn push_array(&mut self, path: Path, array: &Vec<serde_json::Value>) -> Result<&Self> {
-                        //     for element in array.iter() {
-
-                        //     }
-                        // }
 
                         fn push_simple_value(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
                             let path_index_option = path.last().cloned().and_then(|last_segment| {
@@ -786,7 +834,7 @@ macro_rules! define_chest {
                             index_batch: &mut [<$bucket_name:camel IndexBatch>],
                         ) -> Result<DocumentId> {
                             for (internal_path, internal_value) in flatten(&path, &value)
-                                .with_context(|| format!("Can not flatten value {value:?} part at path {path:?}"))?
+                                .with_context(|| format!("Can not flatten value {value:?} at path {path:?}"))?
                             {
                                 index_batch
                                     .push_simple_value(internal_path.clone(), internal_value.clone().into())
@@ -951,64 +999,6 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
             Ok(None)
         }
     }
-}
-
-pub fn flatten_to(
-    path: Path,
-    value: &serde_json::Value,
-    result: &mut Vec<(Path, Value)>,
-) -> Result<()> {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, internal_value) in map {
-                let internal_path = path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
-                    .collect::<Path>();
-                flatten_to(internal_path, &internal_value, result).with_context(|| {
-                    format!("Can not get flat representation of value {internal_value:?} part")
-                })?;
-            }
-        }
-        serde_json::Value::Array(array) => {
-            for (internal_value_index, internal_value) in array.iter().enumerate() {
-                let internal_path = path
-                    .iter()
-                    .cloned()
-                    .chain(
-                        vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
-                    )
-                    .collect::<Path>();
-                flatten_to(internal_path, &internal_value, result).with_context(|| {
-                    format!(
-                        "Can not merge flat representation of value {internal_value:?} part into \
-                         {result:?}"
-                    )
-                })?;
-            }
-        }
-        _ => {
-            result.push((
-                path,
-                (*value).clone().try_into().with_context(|| {
-                    format!("Can not convert json value {value:?} into database storable value")
-                })?,
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn flatten(path: &Path, value: &serde_json::Value) -> Result<Vec<(Path, Value)>> {
-    let mut result: Vec<(Path, Value)> = Vec::new();
-    flatten_to(path.clone(), value, &mut result).with_context(|| {
-        format!(
-            "Can not merge flat representation of value {value:?} part at path {path:?} into \
-             {result:?}"
-        )
-    })?;
-    Ok(result)
 }
 
 impl From<&str> for PathSegment {
@@ -1244,6 +1234,8 @@ mod tests {
                                 for (pathvalue_index, (path, value)) in
                                     flatten_document.iter().enumerate()
                                 {
+                                    let search_path = new_search_path_from_path(path.clone());
+                                    let json_value: serde_json::Value = value.clone().into();
                                     transaction
                                         .main_bucket_contains_exact_path(document_id, path)?;
                                     for segments_count in 0..path.len() {
@@ -1260,6 +1252,14 @@ mod tests {
                                         let base_path = path[..path.len() - 1].to_vec();
                                         match last_path_segment {
                                             PathSegment::JsonObjectKey(_) => {
+                                                assert_eq!(
+                                                    transaction.main_bucket_contains_element(
+                                                        document_id,
+                                                        &search_path,
+                                                        &json_value
+                                                    )?,
+                                                    false
+                                                );
                                                 assert_eq!(
                                                     transaction
                                                         .main_bucket_last_element_index(
@@ -1297,6 +1297,14 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
+                                                assert_eq!(
+                                                    transaction.main_bucket_contains_element(
+                                                        document_id,
+                                                        &search_path,
+                                                        &json_value
+                                                    )?,
+                                                    true
+                                                );
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
