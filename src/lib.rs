@@ -117,60 +117,6 @@ pub fn new_search_path_from_path(path: Path) -> SearchPath {
 
 pub type FlatDocument = Vec<(Path, Value)>;
 
-pub fn flatten_to(path: Path, value: &serde_json::Value, result: &mut FlatDocument) -> Result<()> {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, internal_value) in map {
-                let internal_path = path
-                    .iter()
-                    .cloned()
-                    .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
-                    .collect::<Path>();
-                flatten_to(internal_path, &internal_value, result).with_context(|| {
-                    format!("Can not get flat representation of value {internal_value:?} part")
-                })?;
-            }
-        }
-        serde_json::Value::Array(array) => {
-            for (internal_value_index, internal_value) in array.iter().enumerate() {
-                let internal_path = path
-                    .iter()
-                    .cloned()
-                    .chain(
-                        vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
-                    )
-                    .collect::<Path>();
-                flatten_to(internal_path, &internal_value, result).with_context(|| {
-                    format!(
-                        "Can not merge flat representation of value {internal_value:?} part into \
-                         {result:?}"
-                    )
-                })?;
-            }
-        }
-        _ => {
-            result.push((
-                path,
-                (*value).clone().try_into().with_context(|| {
-                    format!("Can not convert json value {value:?} into database storable value")
-                })?,
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn flatten(path: &Path, value: &serde_json::Value) -> Result<FlatDocument> {
-    let mut result = FlatDocument::new();
-    flatten_to(path.clone(), value, &mut result).with_context(|| {
-        format!(
-            "Can not merge flat representation of value {value:?} part at path {path:?} into \
-             {result:?}"
-        )
-    })?;
-    Ok(result)
-}
-
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     if flat_document.is_empty() {
         Ok(None)
@@ -317,7 +263,7 @@ macro_rules! define_chest {
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, fallible_iterator::FallibleIterator,
-                DocumentId, Document, Path, DocumentsIterator, FlatDocument, Digest, PathSegment, nest, flatten,
+                DocumentId, Document, Path, DocumentsIterator, FlatDocument, Digest, PathSegment, nest,
                 new_search_path_from_path, SearchPath
             };
 
@@ -828,29 +774,52 @@ macro_rules! define_chest {
                     paste! {
                         fn [<$bucket_name _update_with_index>](
                             &mut self,
-                            document_id: DocumentId,
+                            document_id: &DocumentId,
                             path: Path,
-                            value: serde_json::Value,
-                            index_batch: &mut [<$bucket_name:camel IndexBatch>],
-                        ) -> Result<DocumentId> {
-                            for (internal_path, internal_value) in flatten(&path, &value)
-                                .with_context(|| format!("Can not flatten value {value:?} at path {path:?}"))?
-                            {
-                                index_batch
-                                    .push_simple_value(internal_path.clone(), internal_value.clone().into())
-                                    .with_context(|| {
-                                        format!(
-                                            "Can not push path-value pair ({internal_path:?}, {internal_value:?}) \
-                                             into index batch"
-                                        )
-                                    })?;
-                                self.index_transaction
-                                    .database_transaction
-                                    .data
-                                    .[<$bucket_name _document_id_and_path_to_value>]
-                                    .insert((document_id.clone(), internal_path), internal_value);
+                            value: &serde_json::Value,
+                            index_batch: &mut [<$bucket_name:camel IndexBatch>]
+                        ) -> Result<()> {
+                            match value {
+                                serde_json::Value::Object(map) => {
+                                    for (key, internal_value) in map {
+                                        let internal_path = path
+                                            .iter()
+                                            .cloned()
+                                            .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
+                                            .collect::<Path>();
+                                        self.[<$bucket_name _update_with_index>](document_id, internal_path, &internal_value, index_batch).with_context(|| {
+                                            format!("Can not get flat representation of value {internal_value:?} part")
+                                        })?;
+                                    }
+                                }
+                                serde_json::Value::Array(array) => {
+                                    for (internal_value_index, internal_value) in array.iter().enumerate() {
+                                        let internal_path = path
+                                            .iter()
+                                            .cloned()
+                                            .chain(
+                                                vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
+                                            )
+                                            .collect::<Path>();
+                                        self.[<$bucket_name _update_with_index>](document_id, internal_path, &internal_value, index_batch).with_context(|| {
+                                            format!("Can not merge flat representation of value {internal_value:?} part")
+                                        })?;
+                                    }
+                                }
+                                _ => {
+                                    index_batch
+                                        .push_simple_value(path.clone(), value.clone().into())
+                                        .with_context(|| {
+                                            format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
+                                        })?;
+                                    self.index_transaction
+                                        .database_transaction
+                                        .data
+                                        .[<$bucket_name _document_id_and_path_to_value>]
+                                        .insert((document_id.clone(), path), value.clone().try_into().unwrap());
+                                }
                             }
-                            Ok(document_id)
+                            Ok(())
                         }
 
                         pub fn [<$bucket_name _update>](
@@ -861,9 +830,9 @@ macro_rules! define_chest {
                         ) -> Result<DocumentId> {
                             let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
                             self.[<$bucket_name _update_with_index>](
-                                document_id.clone(),
+                                &document_id,
                                 path.clone(),
-                                value.clone(),
+                                &value,
                                 &mut index_batch,
                             )
                             .with_context(|| {
@@ -1195,6 +1164,65 @@ mod tests {
             .unwrap(),
         )
         .unwrap()
+    }
+
+    pub fn flatten_to(
+        path: Path,
+        value: &serde_json::Value,
+        result: &mut FlatDocument,
+    ) -> Result<()> {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, internal_value) in map {
+                    let internal_path = path
+                        .iter()
+                        .cloned()
+                        .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
+                        .collect::<Path>();
+                    flatten_to(internal_path, &internal_value, result).with_context(|| {
+                        format!("Can not get flat representation of value {internal_value:?} part")
+                    })?;
+                }
+            }
+            serde_json::Value::Array(array) => {
+                for (internal_value_index, internal_value) in array.iter().enumerate() {
+                    let internal_path = path
+                        .iter()
+                        .cloned()
+                        .chain(
+                            vec![PathSegment::JsonArrayIndex(internal_value_index as u32)]
+                                .into_iter(),
+                        )
+                        .collect::<Path>();
+                    flatten_to(internal_path, &internal_value, result).with_context(|| {
+                        format!(
+                            "Can not merge flat representation of value {internal_value:?} part \
+                             into {result:?}"
+                        )
+                    })?;
+                }
+            }
+            _ => {
+                result.push((
+                    path,
+                    (*value).clone().try_into().with_context(|| {
+                        format!("Can not convert json value {value:?} into database storable value")
+                    })?,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn flatten(path: &Path, value: &serde_json::Value) -> Result<FlatDocument> {
+        let mut result = FlatDocument::new();
+        flatten_to(path.clone(), value, &mut result).with_context(|| {
+            format!(
+                "Can not merge flat representation of value {value:?} part at path {path:?} into \
+                 {result:?}"
+            )
+        })?;
+        Ok(result)
     }
 
     #[test]
