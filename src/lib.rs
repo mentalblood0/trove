@@ -363,7 +363,7 @@ macro_rules! define_chest {
                             }
                         }
 
-                        fn push_simple_value(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
+                        fn push(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
                             let path_index_option = path.last().cloned().and_then(|last_segment| {
                                 if let PathSegment::JsonArrayIndex(path_index) = last_segment {
                                     Some(path_index)
@@ -539,13 +539,7 @@ macro_rules! define_chest {
                                             value: Digest::new(
                                                 None,
                                                 &search_path,
-                                                &value.clone().try_into().with_context(|| {
-                                                    format!(
-                                                        "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where (\
-                                                         {search_path:?}, {value:?}) is present"
-                                                    )
-                                                })?,
+                                                &value,
                                             )
                                             .with_context(|| {
                                                 format!(
@@ -565,13 +559,7 @@ macro_rules! define_chest {
                                             value: Digest::new(
                                                 None,
                                                 &search_path,
-                                                &value.clone().try_into().with_context(|| {
-                                                    format!(
-                                                        "Can not convert json value {value:?} to database storable \
-                                                         value so to select documents where (\
-                                                         {search_path:?}, {value:?}) is present"
-                                                    )
-                                                })?,
+                                                &value,
                                             )
                                             .with_context(|| {
                                                 format!(
@@ -788,7 +776,7 @@ macro_rules! define_chest {
                                             .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
                                             .collect::<Path>();
                                         self.[<$bucket_name _update_with_index>](document_id, internal_path, &internal_value, index_batch).with_context(|| {
-                                            format!("Can not get flat representation of value {internal_value:?} part")
+                                            format!("Can not get flat representation of value {internal_value:?}")
                                         })?;
                                     }
                                 }
@@ -801,14 +789,24 @@ macro_rules! define_chest {
                                                 vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
                                             )
                                             .collect::<Path>();
+                                        let current_path = {
+                                            let mut result = path.clone();
+                                            result.push(PathSegment::JsonArrayIndex(internal_value_index as u32));
+                                            result
+                                        };
+                                        index_batch
+                                            .push(current_path, internal_value.clone().into())
+                                            .with_context(|| {
+                                                format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
+                                            })?;
                                         self.[<$bucket_name _update_with_index>](document_id, internal_path, &internal_value, index_batch).with_context(|| {
-                                            format!("Can not merge flat representation of value {internal_value:?} part")
+                                            format!("Can not merge flat representation of value {internal_value:?}")
                                         })?;
                                     }
                                 }
                                 _ => {
                                     index_batch
-                                        .push_simple_value(path.clone(), value.clone().into())
+                                        .push(path.clone(), value.clone().into())
                                         .with_context(|| {
                                             format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
                                         })?;
@@ -882,14 +880,14 @@ macro_rules! define_chest {
                                     )
                                 })?;
                             let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
-                            for ((_, current_path), current_value) in paths_to_remove.into_iter() {
+                            for (current_index, ((_, current_path), current_value)) in paths_to_remove.iter().enumerate() {
                                 self.index_transaction
                                     .database_transaction
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
-                                    .push_simple_value(current_path.clone(), current_value.clone().into())
+                                    .push(current_path.clone(), current_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
