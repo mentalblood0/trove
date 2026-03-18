@@ -104,11 +104,11 @@ pub enum SearchPathSegment {
 
 pub type SearchPath = Vec<SearchPathSegment>;
 
-pub fn new_search_path_from_path(path: Path) -> SearchPath {
-    path.into_iter()
+pub fn new_search_path_from_path(path: &Path) -> SearchPath {
+    path.iter()
         .map(|path_segment| match path_segment {
             PathSegment::JsonObjectKey(json_object_key) => {
-                SearchPathSegment::JsonObjectKey(json_object_key)
+                SearchPathSegment::JsonObjectKey(json_object_key.clone())
             }
             PathSegment::JsonArrayIndex(_) => SearchPathSegment::AnyJsonArrayIndex,
         })
@@ -363,7 +363,8 @@ macro_rules! define_chest {
                             }
                         }
 
-                        fn push(&mut self, path: Path, value: serde_json::Value) -> Result<&Self> {
+                        fn push(&mut self, path: &Path, value: &serde_json::Value) -> Result<&Self> {
+                            let search_path = new_search_path_from_path(path);
                             let path_index_option = path.last().cloned().and_then(|last_segment| {
                                 if let PathSegment::JsonArrayIndex(path_index) = last_segment {
                                     Some(path_index)
@@ -371,7 +372,6 @@ macro_rules! define_chest {
                                     None
                                 }
                             });
-                            let search_path = new_search_path_from_path(path);
                             if let Some(path_index) = path_index_option {
                                 self.array_digests
                                     .entry(path_index)
@@ -394,6 +394,38 @@ macro_rules! define_chest {
                                     })?
                                     .value,
                             }));
+                            Ok(self)
+                        }
+
+                        fn push_complex_array_elements_from_structure(&mut self, path_prefix: &Path, structure: &serde_json::Value) -> Result<&Self> {
+                            match structure {
+                                serde_json::Value::Array(array) => {
+                                    for (element_index, element) in array.iter().enumerate() {
+                                        if element.is_array() | element.is_object() {
+                                            let element_path_prefix = {
+                                                let mut result = path_prefix.clone();
+                                                result.push(PathSegment::JsonArrayIndex(element_index as u32));
+                                                result
+                                            };
+                                            self.push(&element_path_prefix, element)?;
+                                            self.push_complex_array_elements_from_structure(&element_path_prefix, element)?;
+                                        }
+                                    }
+                                }
+                                serde_json::Value::Object(object) => {
+                                    for (key, value) in object.iter() {
+                                        if value.is_array() | value.is_object() {
+                                            let element_path_prefix = {
+                                                let mut result = path_prefix.clone();
+                                                result.push(PathSegment::JsonObjectKey(key.clone()));
+                                                result
+                                            };
+                                            self.push_complex_array_elements_from_structure(&element_path_prefix, value)?;
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
                             Ok(self)
                         }
 
@@ -795,7 +827,7 @@ macro_rules! define_chest {
                                             result
                                         };
                                         index_batch
-                                            .push(current_path, internal_value.clone().into())
+                                            .push(&current_path, &internal_value)
                                             .with_context(|| {
                                                 format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
                                             })?;
@@ -806,7 +838,7 @@ macro_rules! define_chest {
                                 }
                                 _ => {
                                     index_batch
-                                        .push(path.clone(), value.clone().into())
+                                        .push(&path, &value)
                                         .with_context(|| {
                                             format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
                                         })?;
@@ -871,6 +903,7 @@ macro_rules! define_chest {
                                 .take_while(|((current_document_id, current_path), _)| {
                                     Ok(*current_document_id == *document_id && current_path.starts_with(&path_prefix))
                                 })
+                                .map(|((_, current_path), current_value)| Ok((current_path, current_value)))
                                 .collect::<Vec<_>>()
                                 .with_context(|| {
                                     format!(
@@ -880,20 +913,23 @@ macro_rules! define_chest {
                                     )
                                 })?;
                             let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
-                            for (current_index, ((_, current_path), current_value)) in paths_to_remove.iter().enumerate() {
+                            for (current_path, current_value) in paths_to_remove.iter() {
                                 self.index_transaction
                                     .database_transaction
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
-                                    .push(current_path.clone(), current_value.clone().into())
+                                    .push(&current_path, &current_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
                                              index batch"
                                         )
                                     })?;
+                            }
+                            if let Some(structure_to_remove) = nest(&paths_to_remove)? {
+                                index_batch.push_complex_array_elements_from_structure(&path_prefix, &structure_to_remove)?;
                             }
                             index_batch
                                 .flush_remove(self.index_transaction)
@@ -1260,7 +1296,7 @@ mod tests {
                                 for (pathvalue_index, (path, value)) in
                                     flatten_document.iter().enumerate()
                                 {
-                                    let search_path = new_search_path_from_path(path.clone());
+                                    let search_path = new_search_path_from_path(path);
                                     let json_value: serde_json::Value = value.clone().into();
                                     transaction
                                         .main_bucket_contains_exact_path(document_id, path)?;
@@ -1298,7 +1334,7 @@ mod tests {
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            new_search_path_from_path(path.clone()),
+                                                            new_search_path_from_path(path),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
@@ -1334,7 +1370,7 @@ mod tests {
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            new_search_path_from_path(path.clone()),
+                                                            new_search_path_from_path(path),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
