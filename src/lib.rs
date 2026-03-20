@@ -1082,7 +1082,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::Document;
+    use crate::{tests::test_chest::WriteTransaction, Document};
     use fallible_iterator::FallibleIterator;
     use pretty_assertions::assert_eq;
 
@@ -1259,6 +1259,53 @@ mod tests {
         Ok(result)
     }
 
+    fn test_array_elements(
+        document_id: &DocumentId,
+        path_prefix: &Path,
+        value: &serde_json::Value,
+        transaction: &WriteTransaction,
+    ) -> Result<()> {
+        match value {
+            serde_json::Value::Array(array) => {
+                for (element_index, element) in array.iter().enumerate() {
+                    let element_path_prefix = {
+                        let mut result = path_prefix.clone();
+                        result.push(PathSegment::JsonArrayIndex(element_index as u32));
+                        result
+                    };
+                    assert!(transaction.main_bucket_contains_element(
+                        document_id,
+                        &new_search_path_from_path(&element_path_prefix),
+                        &element
+                    )?);
+                    test_array_elements(document_id, &element_path_prefix, element, transaction)?;
+                }
+            }
+            serde_json::Value::Object(object) => {
+                for (key, internal_value) in object.iter() {
+                    let internal_value_path_prefix = {
+                        let mut result = path_prefix.clone();
+                        result.push(PathSegment::JsonObjectKey(key.clone()));
+                        result
+                    };
+                    assert!(transaction.main_bucket_contains_element(
+                        document_id,
+                        &new_search_path_from_path(&internal_value_path_prefix),
+                        &internal_value
+                    )?);
+                    test_array_elements(
+                        document_id,
+                        &internal_value_path_prefix,
+                        internal_value,
+                        transaction,
+                    )?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_generative() {
         let mut chest = new_default_chest("test_generative");
@@ -1310,6 +1357,12 @@ mod tests {
                                         );
                                     }
                                     let value_as_json: serde_json::Value = value.clone().into();
+                                    test_array_elements(
+                                        document_id,
+                                        &vec![],
+                                        &value_as_json,
+                                        transaction,
+                                    )?;
                                     if let Some(last_path_segment) = path.last() {
                                         let base_path = path[..path.len() - 1].to_vec();
                                         match last_path_segment {
