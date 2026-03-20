@@ -858,6 +858,10 @@ macro_rules! define_chest {
                             path: Path,
                             value: serde_json::Value,
                         ) -> Result<DocumentId> {
+                            if path.len() > 1 &&
+                                path[..path.len() - 1].iter().any(|path_segment| if let PathSegment::JsonArrayIndex(_) = path_segment { true } else { false }) {
+                                return Err(anyhow!("Complex array elements are immutable in order to discourage index-heavy operations"))
+                            }
                             let mut index_batch = [<$bucket_name:camel IndexBatch>]::new(document_id.clone());
                             self.[<$bucket_name _update_with_index>](
                                 &document_id,
@@ -1316,7 +1320,7 @@ mod tests {
             .lock_all_and_write(|transaction| {
                 let mut previously_added_documents: BTreeMap<DocumentId, serde_json::Value> =
                     BTreeMap::new();
-                for _ in 0..400 {
+                for _ in 0..1000 {
                     let action_id = if previously_added_documents.is_empty() {
                         1
                     } else {
