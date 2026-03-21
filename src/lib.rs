@@ -118,6 +118,7 @@ pub fn new_search_path_from_path(path: &Path) -> SearchPath {
 pub type FlatDocument = Vec<(Path, Value)>;
 
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
+    let mut result_is_some = false;
     if flat_document.is_empty() {
         Ok(None)
     } else if flat_document[0].0.is_empty() {
@@ -158,8 +159,9 @@ pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
                 }
             }
             *current = value.clone().into();
+            result_is_some = true;
         }
-        Ok(Some(result))
+        Ok(if result_is_some { Some(result) } else { None })
     }
 }
 
@@ -1426,14 +1428,14 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
-                                                assert_eq!(
-                                                    transaction.main_bucket_contains_element(
-                                                        document_id,
-                                                        &search_path,
-                                                        &value_as_json
-                                                    )?,
-                                                    true
-                                                );
+                                                assert!(transaction
+                                                    .main_bucket_get(document_id, &base_path)?
+                                                    .is_some());
+                                                assert!(transaction.main_bucket_contains_element(
+                                                    document_id,
+                                                    &search_path,
+                                                    &value_as_json
+                                                )?);
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
