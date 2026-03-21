@@ -112,7 +112,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#fd130d1b6e213cfb797608da2565fb078d02b664"
+source = "git+https://github.com/mentalblood0/dream#5d63f617bbd0e0ad05317b4336af2058dcea0cdd"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "js-sys"
@@ -243,7 +243,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#9c24fc932a2c5f5fee4684fe170a126df5ae7ed8"
+source = "git+https://github.com/mentalblood0/lawn#767753e41c230ed4e67880e6b6cd2df7ebf6cfbd"
 dependencies = [
  "anyhow",
  "bincode",
@@ -438,7 +438,8 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 [[package]]
 name = "saphyr-parser-bw"
 version = "0.0.610"
-source = "git+https://github.com/bourumir-wyngs/saphyr?branch=dev%2Fsaphyr-parser#2f6bfa10691da6b838902ee78814724f6122b5d9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d643f5e972f17219245b82f038c22cd3c74320bb17c6e8f7e8537de268b1bc6"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -469,8 +470,8 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.21"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#313ebd652f12a5bf4218dd4b1a4542b1237d2c35"
+version = "0.0.22"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#c6696cd417026ab81699c29db216cee542af85bf"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -826,18 +827,18 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -935,7 +935,7 @@ macro_rules! define_chest {
                                     .database_transaction
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
-                                    .remove(&(document_id.clone(), current_path.clone()));
+                                    .remove((document_id.clone(), current_path.clone()));
                                 index_batch
                                     .push(&current_path, &current_value.clone().into())
                                     .with_context(|| {
@@ -1661,7 +1661,6 @@ mod tests {
                     array_path.clone(),
                     array_json.clone(),
                 )?;
-                dbg!(transaction.main_bucket_get_flattened(&document.id, &array_path)?);
                 assert_eq!(
                     transaction
                         .main_bucket_get(&document.id, &array_path)?
