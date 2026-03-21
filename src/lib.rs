@@ -881,7 +881,7 @@ macro_rules! define_chest {
                             Ok(document_id)
                         }
 
-                        fn [<$bucket_name _set>](
+                        pub fn [<$bucket_name _set>](
                             &mut self,
                             document_id: DocumentId,
                             path: Path,
