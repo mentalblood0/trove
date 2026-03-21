@@ -1348,7 +1348,6 @@ mod tests {
                                     flatten_document.iter().enumerate()
                                 {
                                     let search_path = new_search_path_from_path(path);
-                                    let json_value: serde_json::Value = value.clone().into();
                                     transaction
                                         .main_bucket_contains_exact_path(document_id, path)?;
                                     for segments_count in 0..path.len() {
@@ -1375,7 +1374,7 @@ mod tests {
                                                     transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &search_path,
-                                                        &json_value
+                                                        &value_as_json
                                                     )?,
                                                     false
                                                 );
@@ -1391,7 +1390,7 @@ mod tests {
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            new_search_path_from_path(path),
+                                                            search_path.clone(),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
@@ -1420,14 +1419,14 @@ mod tests {
                                                     transaction.main_bucket_contains_element(
                                                         document_id,
                                                         &search_path,
-                                                        &json_value
+                                                        &value_as_json
                                                     )?,
                                                     true
                                                 );
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
-                                                            new_search_path_from_path(path),
+                                                            search_path.clone(),
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
@@ -1436,17 +1435,11 @@ mod tests {
                                                     .collect::<Vec<DocumentId>>()?;
                                                 for selected_document_id in selected.iter() {
                                                     assert!(transaction
-                                                        .main_bucket_get(
-                                                            &selected_document_id,
-                                                            &base_path
-                                                        )?
-                                                        .unwrap()
-                                                        .as_array()
-                                                        .unwrap()
-                                                        .iter()
-                                                        .any(|got_array_element| {
-                                                            got_array_element == &value_as_json
-                                                        }));
+                                                        .main_bucket_contains_element(
+                                                            selected_document_id,
+                                                            &search_path,
+                                                            &value_as_json
+                                                        )?);
                                                 }
                                                 assert!(selected.iter().any(
                                                     |selected_document_id| {
@@ -1464,6 +1457,19 @@ mod tests {
                                                                     ),
                                                                 )
                                                     })
+                                                    && !(path.len() > 1
+                                                        && path[..path.len() - 1].iter().any(
+                                                            |path_segment| {
+                                                                if let PathSegment::JsonArrayIndex(
+                                                                    _,
+                                                                ) = path_segment
+                                                                {
+                                                                    true
+                                                                } else {
+                                                                    false
+                                                                }
+                                                            },
+                                                        ))
                                                 {
                                                     transaction
                                                         .main_bucket_remove(document_id, path)
