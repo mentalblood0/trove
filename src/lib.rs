@@ -1430,7 +1430,8 @@ mod tests {
                                             PathSegment::JsonArrayIndex(current_array_index) => {
                                                 assert!(transaction
                                                     .main_bucket_get(document_id, &base_path)?
-                                                    .is_some());
+                                                    .unwrap()
+                                                    .is_array());
                                                 assert!(transaction.main_bucket_contains_element(
                                                     document_id,
                                                     &search_path,
@@ -1632,6 +1633,40 @@ mod tests {
                 assert_eq!(
                     transaction.main_bucket_documents()?.collect::<Vec<_>>()?,
                     vec![document.clone()]
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_set_optional_array() {
+        let mut chest = new_default_chest("test_set_optional_array");
+        let document_json = json!({"commands_queue": null});
+
+        let document = chest
+            .lock_all_and_write(|transaction| {
+                Ok(Document {
+                    id: transaction.main_bucket_insert(document_json.clone())?,
+                    value: document_json.clone(),
+                })
+            })
+            .unwrap();
+        chest
+            .lock_all_and_write(|transaction| {
+                let array_path = path_segments!("commands_queue");
+                let array_json = json!({"commands": [1]});
+                transaction.main_bucket_set(
+                    document.id.clone(),
+                    array_path.clone(),
+                    array_json.clone(),
+                )?;
+                dbg!(transaction.main_bucket_get_flattened(&document.id, &array_path)?);
+                assert_eq!(
+                    transaction
+                        .main_bucket_get(&document.id, &array_path)?
+                        .unwrap(),
+                    array_json
                 );
                 Ok(())
             })
