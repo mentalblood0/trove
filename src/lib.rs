@@ -852,7 +852,7 @@ macro_rules! define_chest {
                             Ok(())
                         }
 
-                        pub fn [<$bucket_name _update>](
+                        fn [<$bucket_name _update>](
                             &mut self,
                             document_id: DocumentId,
                             path: Path,
@@ -881,13 +881,24 @@ macro_rules! define_chest {
                             Ok(document_id)
                         }
 
+                        fn [<$bucket_name _set>](
+                            &mut self,
+                            document_id: DocumentId,
+                            path: Path,
+                            value: serde_json::Value,
+                        ) -> Result<DocumentId> {
+                            self.[<$bucket_name _remove>](&document_id, &path)?;
+                            self.[<$bucket_name _update>](document_id.clone(), path, value)?;
+                            Ok(document_id)
+                        }
+
                         pub fn [<$bucket_name _insert>](&mut self, value: serde_json::Value) -> Result<DocumentId> {
                             let id = DocumentId::new();
-                            self.[<$bucket_name _update>](id.clone(), vec![], value)
+                            self.[<$bucket_name _insert_with_id>](Document { id: id.clone(), value })
                         }
 
                         pub fn [<$bucket_name _insert_with_id>](&mut self, document: Document) -> Result<DocumentId> {
-                            self.[<$bucket_name _update>](document.id, vec![], document.value)
+                            self.[<$bucket_name _set>](document.id, vec![], document.value)
                         }
 
                         pub fn [<$bucket_name _remove>](&mut self, document_id: &DocumentId, path_prefix: &Path) -> Result<()> {
