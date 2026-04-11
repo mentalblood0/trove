@@ -611,11 +611,13 @@ macro_rules! define_chest {
                                         .[<$bucket_name _search>](
                                             &present_ids,
                                             &absent_ids,
-                                            start_after_document.and_then(|start_after_document| {
-                                                Some(dream::Id {
-                                                    value: start_after_document.value,
-                                                })
-                                            }),
+                                            start_after_document
+                                                .or(Some(DocumentId {value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]}))
+                                                .and_then(|start_after_document| {
+                                                    Some(dream::Id {
+                                                        value: start_after_document.value,
+                                                    })
+                                                }),
                                         )
                                         .with_context(|| {
                                             format!(
@@ -1341,7 +1343,7 @@ mod tests {
                     };
                     match action_id {
                         1 => {
-                            let new_documents = (0..1)
+                            let new_documents = (1..3)
                                 .map(|_| {
                                     let json = json_generator.generate(3);
                                     (transaction.main_bucket_insert(json.clone()).unwrap(), json)
@@ -1355,6 +1357,25 @@ mod tests {
                                     .collect::<Vec<_>>()
                             );
                             previously_added_documents.extend(new_documents.clone());
+                            assert_eq!(
+                                transaction
+                                    .main_bucket_select(&vec![], &vec![], None)?
+                                    .collect::<HashSet<_>>()?,
+                                previously_added_documents
+                                    .keys()
+                                    .cloned()
+                                    .collect::<HashSet<_>>()
+                            );
+                            assert_eq!(
+                                transaction
+                                    .main_bucket_documents()?
+                                    .map(|current_document| Ok((
+                                        current_document.id,
+                                        current_document.value
+                                    )))
+                                    .collect::<BTreeMap<_, _>>()?,
+                                previously_added_documents
+                            );
                             for (document_id, document_value) in new_documents.iter() {
                                 assert_eq!(
                                     transaction
@@ -1415,7 +1436,12 @@ mod tests {
                                                             value_as_json.clone(),
                                                         )],
                                                         &vec![],
-                                                        None,
+                                                        Some(DocumentId {
+                                                            value: [
+                                                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                                                                0, 0, 0, 0,
+                                                            ],
+                                                        }),
                                                     )?
                                                     .collect::<Vec<DocumentId>>()?;
                                                 for selected_document_id in selected.iter() {
@@ -1551,25 +1577,6 @@ mod tests {
                                     }
                                 }
                             }
-                            assert_eq!(
-                                transaction
-                                    .main_bucket_select(&vec![], &vec![], None)?
-                                    .collect::<HashSet<_>>()?,
-                                previously_added_documents
-                                    .keys()
-                                    .cloned()
-                                    .collect::<HashSet<_>>()
-                            );
-                            assert_eq!(
-                                transaction
-                                    .main_bucket_documents()?
-                                    .map(|current_document| Ok((
-                                        current_document.id,
-                                        current_document.value
-                                    )))
-                                    .collect::<BTreeMap<_, _>>()?,
-                                previously_added_documents
-                            );
                         }
                         2 => {
                             let document_to_remove_id = previously_added_documents
@@ -1584,21 +1591,28 @@ mod tests {
                                 transaction.main_bucket_get(&document_to_remove_id, &vec![])?,
                                 None
                             );
-                            assert_eq!(
-                                transaction.main_bucket_get(&document_to_remove_id, &vec![])?,
-                                None
-                            );
                         }
                         3 => {
-                            let document_to_remove_from_id = previously_added_documents
-                                .keys()
-                                .nth(rng.generate_range(0..previously_added_documents.len()))
-                                .unwrap()
-                                .clone();
+                            let document_to_remove_from_id = {
+                                let complex_documents_ids = previously_added_documents
+                                    .iter()
+                                    .filter(|(_, document)| {
+                                        flatten(&vec![], document).iter().len() > 1
+                                    })
+                                    .map(|(document_id, _)| document_id)
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+                                if complex_documents_ids.is_empty() {
+                                    continue;
+                                }
+                                complex_documents_ids
+                                    [rng.generate_range(0..complex_documents_ids.len())]
+                                .clone()
+                            };
                             let flattened_document_to_remove_from = transaction
                                 .main_bucket_get_flattened(&document_to_remove_from_id, &vec![])?;
                             let path_to_remove = flattened_document_to_remove_from
-                                [rng.generate_range(0..flattened_document_to_remove_from.len())]
+                                [rng.generate_range(1..flattened_document_to_remove_from.len())]
                             .0
                             .clone();
                             println!(
