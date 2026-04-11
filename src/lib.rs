@@ -770,8 +770,8 @@ macro_rules! define_chest {
                                             value: Digest::new(Some(document_id), path, element)
                                                 .with_context(|| {
                                                     format!(
-                                                        "Can not compute array type digest for path {path:?}, \
-                                                         document id {:?} and value {element:?}",
+                                                        "Can not compute digest for document id {:?}, search \
+                                                        path {path:?}, and value {element:?}",
                                                         document_id
                                                     )
                                                 })?
@@ -1471,6 +1471,7 @@ mod tests {
                                                     &search_path,
                                                     &value_as_json
                                                 )?);
+                                                dbg!(current_array_index);
                                                 assert!(transaction
                                                     .main_bucket_get_element_index(
                                                         document_id,
