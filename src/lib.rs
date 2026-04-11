@@ -1093,7 +1093,7 @@ macro_rules! search_path_segments {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
     use nanorand::{Rng, WyRand};
     use serde_json::json;
@@ -1551,6 +1551,15 @@ mod tests {
                                     }
                                 }
                             }
+                            assert_eq!(
+                                transaction
+                                    .main_bucket_select(&vec![], &vec![], None)?
+                                    .collect::<HashSet<_>>()?,
+                                previously_added_documents
+                                    .keys()
+                                    .cloned()
+                                    .collect::<HashSet<_>>()
+                            );
                             assert_eq!(
                                 transaction
                                     .main_bucket_documents()?
