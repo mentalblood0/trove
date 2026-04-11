@@ -1471,6 +1471,13 @@ mod tests {
                                                     &search_path,
                                                     &value_as_json
                                                 )?);
+                                                assert!(transaction
+                                                    .main_bucket_get_element_index(
+                                                        document_id,
+                                                        &search_path,
+                                                        &value_as_json
+                                                    )?
+                                                    .is_some());
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
