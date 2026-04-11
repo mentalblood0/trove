@@ -1347,6 +1347,14 @@ mod tests {
                                     (transaction.main_bucket_insert(json.clone()).unwrap(), json)
                                 })
                                 .collect::<Vec<_>>();
+                            println!(
+                                "add {:?}",
+                                new_documents
+                                    .iter()
+                                    .map(|(document_id, _)| document_id)
+                                    .collect::<Vec<_>>()
+                            );
+                            previously_added_documents.extend(new_documents.clone());
                             for (document_id, document_value) in new_documents.iter() {
                                 assert_eq!(
                                     transaction
@@ -1448,6 +1456,8 @@ mod tests {
                                                     )?
                                                     .collect::<Vec<DocumentId>>()?;
                                                 for selected_document_id in selected.iter() {
+                                                    assert!(previously_added_documents
+                                                        .contains_key(selected_document_id));
                                                     assert!(transaction
                                                         .main_bucket_contains_element(
                                                             selected_document_id,
@@ -1541,7 +1551,6 @@ mod tests {
                                     }
                                 }
                             }
-                            previously_added_documents.extend(new_documents);
                             assert_eq!(
                                 transaction
                                     .main_bucket_documents()?
@@ -1559,6 +1568,7 @@ mod tests {
                                 .nth(rng.generate_range(0..previously_added_documents.len()))
                                 .unwrap()
                                 .clone();
+                            println!("remove {document_to_remove_id:?}");
                             transaction.main_bucket_remove(&document_to_remove_id, &vec![])?;
                             previously_added_documents.remove(&document_to_remove_id);
                             assert_eq!(
@@ -1582,6 +1592,9 @@ mod tests {
                                 [rng.generate_range(0..flattened_document_to_remove_from.len())]
                             .0
                             .clone();
+                            println!(
+                                "remove {path_to_remove:?} from {document_to_remove_from_id:?}"
+                            );
                             let correct_result_option = nest(
                                 &flattened_document_to_remove_from
                                     .into_iter()
