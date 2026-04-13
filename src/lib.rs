@@ -673,7 +673,7 @@ macro_rules! define_chest {
                                                 ))
                                             }
                                             PathSegment::JsonArrayIndex(array_index) => *array_index,
-                                        } + 1)
+                                        })
                                     })
                                     .next()?
                                     .or_else(|| if found_document { None } else { Some(0) }))
@@ -688,7 +688,7 @@ macro_rules! define_chest {
                                     let result_path = array_path
                                         .iter()
                                         .cloned()
-                                        .chain(vec![PathSegment::JsonArrayIndex(last_element_index - 1)].into_iter())
+                                        .chain(vec![PathSegment::JsonArrayIndex(last_element_index)].into_iter())
                                         .collect::<Vec<_>>();
                                     Ok(Some(self.[<$bucket_name _get>](document_id, &result_path)?.ok_or_else(
                                         || anyhow!("Can not get last element of array at path {result_path:?}"),
@@ -959,18 +959,20 @@ macro_rules! define_chest {
                         pub fn [<$bucket_name _push>](
                             &mut self,
                             document_id: &DocumentId,
-                            array_path: &Path,
-                            value: serde_json::Value,
+                            array_path: Path,
+                            values: Vec<serde_json::Value>,
                         ) -> Result<u32> {
-                            let last_element_index= self
-                                .[<$bucket_name _last_element_index>](document_id, array_path)?
+                            let mut last_element_index= self
+                                .[<$bucket_name _last_element_index>](document_id, &array_path)?
                                 .ok_or_else(|| anyhow!("Can not get length of array at path {array_path:?}"))?;
-                            let push_path = array_path
-                                .iter()
-                                .cloned()
-                                .chain(vec![PathSegment::JsonArrayIndex(last_element_index)].into_iter())
-                                .collect::<Vec<_>>();
-                            self.[<$bucket_name _update>](document_id.clone(), push_path, value)?;
+                            let mut push_path = array_path;
+                            push_path.push(PathSegment::JsonArrayIndex(0));
+                            let push_path_len = push_path.len();
+                            for value in values.into_iter() {
+                                push_path[push_path_len - 1] = PathSegment::JsonArrayIndex(last_element_index + 1);
+                                self.[<$bucket_name _update>](document_id.clone(), push_path.clone(), value)?;
+                                last_element_index += 1;
+                            }
                             Ok(last_element_index)
                         }
                     }
@@ -1471,7 +1473,6 @@ mod tests {
                                                     &search_path,
                                                     &value_as_json
                                                 )?);
-                                                dbg!(current_array_index);
                                                 assert!(transaction
                                                     .main_bucket_get_element_index(
                                                         document_id,
@@ -1529,16 +1530,6 @@ mod tests {
                                                             },
                                                         ))
                                                 {
-                                                    transaction
-                                                        .main_bucket_remove(document_id, path)
-                                                        .unwrap();
-                                                    transaction
-                                                        .main_bucket_push(
-                                                            document_id,
-                                                            &base_path,
-                                                            value_as_json.clone(),
-                                                        )
-                                                        .unwrap();
                                                     assert_eq!(
                                                         transaction
                                                             .main_bucket_last_element_index(
@@ -1546,8 +1537,18 @@ mod tests {
                                                                 &base_path
                                                             )
                                                             .unwrap(),
-                                                        Some(*current_array_index + 1),
+                                                        Some(*current_array_index),
                                                     );
+                                                    transaction
+                                                        .main_bucket_remove(document_id, path)
+                                                        .unwrap();
+                                                    transaction
+                                                        .main_bucket_push(
+                                                            document_id,
+                                                            base_path.clone(),
+                                                            [value_as_json.clone()].into(),
+                                                        )
+                                                        .unwrap();
                                                     assert_eq!(
                                                         transaction
                                                             .main_bucket_last(
