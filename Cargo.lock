@@ -99,14 +99,13 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#3f8a1a2b9e13079ce1e3bcbb1c599750d776507e"
+source = "git+https://github.com/mentalblood0/dream#a806bbc13c44d076a82e8f211c818d04313fb728"
 dependencies = [
  "anyhow",
  "fallible-iterator",
  "lawn",
  "paste",
  "serde",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -455,6 +454,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "uuid",
+ "xxhash-rust",
 ]
 
 [[package]]

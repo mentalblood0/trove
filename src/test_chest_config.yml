@@ -19,27 +19,13 @@ index:
             fixed:
               path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/object_and_tag/data.dat
               container_size: 32
-        id_to_source:
+        object:
           index:
-            path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/id_to_source/index.idx
-          data_pool:
-            variable:
-              directory: /tmp/trove/test/TEST_NAME/schemas/main_bucket/id_to_source/data
-              max_element_size: 65536
-        tag_to_objects_count:
-          index:
-            path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/tag_to_objects_count/index.idx
+            path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/object/index.idx
           data_pool:
             fixed:
-              path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/tag_to_objects_count/data.dat
-              container_size: 20
-        object_to_tags_count:
-          index:
-            path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/object_to_tags_count/index.idx
-          data_pool:
-            fixed:
-              path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/object_to_tags_count/data.dat
-              container_size: 20
+              path: /tmp/trove/test/TEST_NAME/schemas/main_bucket/object/data.dat
+              container_size: 16
       another_bucket:
         tag_and_object:
           index:
@@ -55,27 +41,13 @@ index:
             fixed:
               path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/object_and_tag/data.dat
               container_size: 32
-        id_to_source:
+        object:
           index:
-            path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/id_to_source/index.idx
-          data_pool:
-            variable:
-              directory: /tmp/trove/test/TEST_NAME/schemas/another_bucket/id_to_source/data
-              max_element_size: 65536
-        tag_to_objects_count:
-          index:
-            path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/tag_to_objects_count/index.idx
+            path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/object/index.idx
           data_pool:
             fixed:
-              path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/tag_to_objects_count/data.dat
-              container_size: 20
-        object_to_tags_count:
-          index:
-            path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/object_to_tags_count/index.idx
-          data_pool:
-            fixed:
-              path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/object_to_tags_count/data.dat
-              container_size: 20
+              path: /tmp/trove/test/TEST_NAME/schemas/another_bucket/object/data.dat
+              container_size: 16
       data:
         main_bucket_document_id_and_path_to_value:
           index:

@@ -8,7 +8,6 @@ pub extern crate paste;
 pub extern crate serde;
 
 pub use dream::bincode;
-pub use dream::xxhash_rust;
 
 #[derive(
     Clone, Default, PartialEq, PartialOrd, Debug, bincode::Encode, bincode::Decode, Eq, Ord, Hash,
@@ -354,8 +353,8 @@ macro_rules! define_chest {
                     #[derive(Debug, Clone)]
                     struct [<$bucket_name:camel IndexBatch>] {
                         document_id: DocumentId,
-                        digests: Vec<dream::Object>,
-                        array_digests: HashMap<u32, Vec<dream::Object>>,
+                        digests: Vec<dream::Id>,
+                        array_digests: HashMap<u32, Vec<dream::Id>>,
                     }
 
                     impl [<$bucket_name:camel IndexBatch>] {
@@ -380,8 +379,8 @@ macro_rules! define_chest {
                                 self.array_digests
                                     .entry(path_index)
                                     .or_insert(Vec::new())
-                                    .push(dream::Object::Identified(dream::Id {
-                                        value: Digest::new(Some(&self.document_id), &search_path, &value)
+                                    .push(dream::Id(
+                                         Digest::new(Some(&self.document_id), &search_path, &value)
                                             .with_context(|| {
                                                 format!(
                                                     "Can not compute digest for document id {:?}, search path {search_path:?} and value {value:?}",
@@ -389,15 +388,15 @@ macro_rules! define_chest {
                                                 )
                                             })?
                                             .value,
-                                    }));
+                                    ));
                             }
-                            self.digests.push(dream::Object::Identified(dream::Id {
-                                value: Digest::new(None, &search_path, &value)
+                            self.digests.push(dream::Id(
+                                Digest::new(None, &search_path, &value)
                                     .with_context(|| {
                                         format!("Can not compute digest for search path {:?} and value {:?}", search_path, value)
                                     })?
                                     .value,
-                            }));
+                            ));
                             Ok(self)
                         }
 
@@ -434,21 +433,21 @@ macro_rules! define_chest {
                         }
 
                         fn u32_to_dream_id(input: u32) -> dream::Id {
-                            let mut value = [0u8; 16];
-                            value[12..].copy_from_slice(&input.to_be_bytes());
-                            dream::Id { value }
+                            let mut result = [0u8; 16];
+                            result[12..].copy_from_slice(&input.to_be_bytes());
+                            dream::Id(result)
                         }
 
                         fn dream_id_to_u32(id: dream::Id) -> u32 {
-                            u32::from_be_bytes(id.value[12..16].try_into().unwrap())
+                            u32::from_be_bytes(id.0[12..16].try_into().unwrap())
                         }
 
-                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &Vec<dream::Object>)> + '_> {
+                        fn iter(&'_ self) -> Box<dyn Iterator<Item = (dream::Id, &Vec<dream::Id>)> + '_> {
                             Box::new(
                                 vec![(
-                                    dream::Id {
-                                        value: self.document_id.value,
-                                    },
+                                    dream::Id(
+                                        self.document_id.value,
+                                    ),
                                     &self.digests,
                                 )]
                                 .into_iter()
@@ -466,7 +465,7 @@ macro_rules! define_chest {
                         ) -> Result<&Self> {
                             for (dream_id, tags) in self.iter() {
                                 index_transaction
-                                    .[<$bucket_name _insert>](&dream::Object::Identified(dream_id.clone()), tags)
+                                    .[<$bucket_name _insert>](&dream_id, tags)
                                     .with_context(|| {
                                         format!("Can not insert id-tags pair ({dream_id:?}, {tags:?}) into dream index")
                                     })?;
@@ -480,7 +479,7 @@ macro_rules! define_chest {
                         ) -> Result<&Self> {
                             for (dream_id, tags) in self.iter() {
                                 index_transaction
-                                    .[<$bucket_name _remove_tags_from_object>](&dream::Object::Identified(dream_id.clone()), tags)
+                                    .[<$bucket_name _remove_tags_from_object>](&dream_id, tags)
                                     .with_context(|| {
                                         format!("Can not remove tags {tags:?} from object with id {dream_id:?} in dream index")
                                     })?;
@@ -571,8 +570,8 @@ macro_rules! define_chest {
                                 let present_ids = {
                                     let mut result = Vec::new();
                                     for (search_path, value) in presention_conditions {
-                                        result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::new(
+                                        result.push(dream::Id(
+                                            Digest::new(
                                                 None,
                                                 &search_path,
                                                 &value,
@@ -584,15 +583,15 @@ macro_rules! define_chest {
                                                 )
                                             })?
                                             .value,
-                                        }));
+                                        ));
                                     }
                                     result
                                 };
                                 let absent_ids = {
                                     let mut result = Vec::new();
                                     for (search_path, value) in absention_conditions {
-                                        result.push(dream::Object::Identified(dream::Id {
-                                            value: Digest::new(
+                                        result.push(dream::Id(
+                                            Digest::new(
                                                 None,
                                                 &search_path,
                                                 &value,
@@ -604,7 +603,7 @@ macro_rules! define_chest {
                                                 )
                                             })?
                                             .value,
-                                        }));
+                                        ));
                                     }
                                     result
                                 };
@@ -616,9 +615,9 @@ macro_rules! define_chest {
                                             start_after_document
                                                 .or(Some(DocumentId {value: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]}))
                                                 .and_then(|start_after_document| {
-                                                    Some(dream::Id {
-                                                        value: start_after_document.value,
-                                                    })
+                                                    Some(dream::Id(
+                                                        start_after_document.value,
+                                                    ))
                                                 }),
                                         )
                                         .with_context(|| {
@@ -630,7 +629,7 @@ macro_rules! define_chest {
                                         })?
                                         .map(|dream_id| {
                                             Ok(DocumentId {
-                                                value: dream_id.value,
+                                                value: dream_id.0,
                                             })
                                         }),
                                 ))
@@ -747,8 +746,8 @@ macro_rules! define_chest {
                                 element: &serde_json::Value,
                             ) -> Result<bool> {
                                 self.index_transaction
-                                    .[<$bucket_name _has_object_with_tag>](&dream::Object::Identified(dream::Id {
-                                        value: Digest::new(Some(document_id), search_path, element)
+                                    .[<$bucket_name _has_object_with_tag>](&dream::Id(
+                                        Digest::new(Some(document_id), search_path, element)
                                             .with_context(|| {
                                                 format!(
                                                     "Can not compute digest for search path {search_path:?}, \
@@ -756,7 +755,7 @@ macro_rules! define_chest {
                                                 )
                                             })?
                                             .value,
-                                    }))
+                                    ))
                             }
 
                             pub fn [<$bucket_name _get_element_index>](
@@ -768,8 +767,8 @@ macro_rules! define_chest {
                                 Ok(self
                                     .index_transaction
                                     .[<$bucket_name _search>](
-                                        &[dream::Object::Identified(dream::Id {
-                                            value: Digest::new(Some(document_id), path, element)
+                                        &[dream::Id(
+                                            Digest::new(Some(document_id), path, element)
                                                 .with_context(|| {
                                                     format!(
                                                         "Can not compute digest for document id {:?}, search \
@@ -778,7 +777,7 @@ macro_rules! define_chest {
                                                     )
                                                 })?
                                                 .value,
-                                        })],
+                                        )],
                                         &[],
                                         None,
                                     )?
@@ -881,14 +880,9 @@ macro_rules! define_chest {
                                      {value:?}) also updating index batch {index_batch:?}"
                                 )
                             })?;
-                            {
-                                let start = std::time::Instant::now();
-                                index_batch
-                                    .flush_insert(self.index_transaction)
-                                    .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
-                                let elapsed = start.elapsed();
-                                println!("flush_insert took {elapsed:?}");
-                            }
+                            index_batch
+                                .flush_insert(self.index_transaction)
+                                .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
                             Ok(document_id)
                         }
 
@@ -1101,7 +1095,7 @@ macro_rules! search_path_segments {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::{BTreeMap, BTreeSet};
 
     use nanorand::{Rng, WyRand};
     use serde_json::json;
@@ -1361,11 +1355,11 @@ mod tests {
                             assert_eq!(
                                 transaction
                                     .main_bucket_select(&vec![], &vec![], None)?
-                                    .collect::<HashSet<_>>()?,
+                                    .collect::<BTreeSet<_>>()?,
                                 previously_added_documents
                                     .keys()
                                     .cloned()
-                                    .collect::<HashSet<_>>()
+                                    .collect::<BTreeSet<_>>()
                             );
                             assert_eq!(
                                 transaction
