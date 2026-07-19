@@ -2,6 +2,7 @@ index:
   database:
     log:
       path: /tmp/trove/test/TEST_NAME/log.dat
+      checkpoint_on_size: 8 GB
     schemas:
       main_bucket:
         tag_and_object:

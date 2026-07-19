@@ -76,6 +76,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "bytesize"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7c8918969267b2932ffd5655509bbbea0833823058c378876953217f5fc50e"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -90,7 +99,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#2721f1d6f9b84932373a9747f942083d9ad8416b"
+source = "git+https://github.com/mentalblood0/dream#3f8a1a2b9e13079ce1e3bcbb1c599750d776507e"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -189,10 +198,11 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#4d5ae1a6ce2d9de60608246c1c2f13e692d2230f"
+source = "git+https://github.com/mentalblood0/lawn#00d5033c87258510174213d36a38076651faba46"
 dependencies = [
  "anyhow",
  "bincode",
+ "bytesize",
  "fallible-iterator",
  "parking_lot",
  "serde",

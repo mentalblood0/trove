@@ -899,8 +899,7 @@ macro_rules! define_chest {
                         }
 
                         pub fn [<$bucket_name _insert>](&mut self, value: serde_json::Value) -> Result<DocumentId> {
-                            let id = DocumentId::new();
-                            self.[<$bucket_name _insert_with_id>](Document { id: id.clone(), value })
+                            self.[<$bucket_name _insert_with_id>](Document { id: DocumentId::new(), value })
                         }
 
                         pub fn [<$bucket_name _insert_with_id>](&mut self, document: Document) -> Result<DocumentId> {
