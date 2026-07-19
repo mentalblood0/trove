@@ -99,7 +99,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#0988f66f85e4aba8e3b02bd63459ba617bee4663"
+source = "git+https://github.com/mentalblood0/dream#a81a8debd78325394c51fba6ed22e5f3a79ef6d4"
 dependencies = [
  "anyhow",
  "fallible-iterator",

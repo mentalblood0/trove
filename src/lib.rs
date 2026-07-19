@@ -826,13 +826,8 @@ macro_rules! define_chest {
                                                 vec![PathSegment::JsonArrayIndex(internal_value_index as u32)].into_iter(),
                                             )
                                             .collect::<Path>();
-                                        let current_path = {
-                                            let mut result = path.clone();
-                                            result.push(PathSegment::JsonArrayIndex(internal_value_index as u32));
-                                            result
-                                        };
                                         index_batch
-                                            .push(&current_path, &internal_value)
+                                            .push(&internal_path, &internal_value)
                                             .with_context(|| {
                                                 format!("Can not push path-value pair ({path:?}, {value:?}) into index batch")
                                             })?;
