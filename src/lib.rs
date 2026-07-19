@@ -881,9 +881,14 @@ macro_rules! define_chest {
                                      {value:?}) also updating index batch {index_batch:?}"
                                 )
                             })?;
-                            index_batch
-                                .flush_insert(self.index_transaction)
-                                .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
+                            {
+                                let start = std::time::Instant::now();
+                                index_batch
+                                    .flush_insert(self.index_transaction)
+                                    .with_context(|| format!("Can not flush-insert index batch {index_batch:?}"))?;
+                                let elapsed = start.elapsed();
+                                println!("flush_insert took {elapsed:?}");
+                            }
                             Ok(document_id)
                         }
 
@@ -1838,7 +1843,6 @@ mod tests {
                         .as_array()
                         .unwrap()[3]
                 );
-
                 Ok(())
             })
             .unwrap();
