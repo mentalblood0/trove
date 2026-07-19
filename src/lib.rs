@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 
 pub extern crate anyhow;
@@ -56,7 +56,7 @@ impl serde::Serialize for DocumentId {
     {
         use base64::Engine;
         base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(&self.value)
+            .encode(self.value)
             .serialize(serializer)
     }
 }
@@ -182,7 +182,7 @@ impl TryFrom<serde_json::Value> for Value {
         match json_value {
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    Ok(Value::Integer(i as i64))
+                    Ok(Value::Integer(i))
                 } else if let Some(f) = n.as_f64() {
                     Ok(Value::Float(f))
                 } else {
@@ -310,7 +310,7 @@ macro_rules! define_chest {
                     })
                 }
 
-                pub fn lock_all_and_write<'a, F, R>(&'a mut self, mut f: F) -> Result<R>
+                pub fn lock_all_and_write<F, R>(&mut self, mut f: F) -> Result<R>
                 where
                     F: FnMut(&mut WriteTransaction<'_, '_, '_>) -> Result<R>,
                 {
@@ -640,7 +640,7 @@ macro_rules! define_chest {
                                     array_path
                                         .iter()
                                         .cloned()
-                                        .chain(vec![PathSegment::JsonArrayIndex(std::u32::MAX)])
+                                        .chain(vec![PathSegment::JsonArrayIndex(u32::MAX)])
                                         .collect::<Path>(),
                                 ));
                                 let mut found_document = false;
@@ -776,8 +776,8 @@ macro_rules! define_chest {
                                                     )
                                                 })?
                                                 .value,
-                                        })].into(),
-                                        &[].into(),
+                                        })],
+                                        &[],
                                         None,
                                     )?
                                     .next()?
@@ -937,7 +937,7 @@ macro_rules! define_chest {
                                     .database_transaction
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
-                                    .remove((document_id.clone(), current_path.clone()));
+                                    .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
                                     .push(&current_path, &current_value.clone().into())
                                     .with_context(|| {
@@ -994,9 +994,9 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                 .with_context(|| "Can not get first data table entry")?;
         }
         if let Some(first_document_entry) = self.last_entry.clone() {
-            let document_id = first_document_entry.0 .0;
+            let document_id = first_document_entry.0.0;
             let mut flat_document: FlatDocument = Vec::new();
-            flat_document.push((first_document_entry.0 .1, first_document_entry.1));
+            flat_document.push((first_document_entry.0.1, first_document_entry.1));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
                     format!(
@@ -1005,19 +1005,17 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                     )
                 })?;
                 if let Some(current_entry) = &self.last_entry {
-                    if current_entry.0 .0 != document_id {
+                    if current_entry.0.0 != document_id {
                         break;
                     }
-                    flat_document.push((current_entry.0 .1.clone(), current_entry.1.clone()));
+                    flat_document.push((current_entry.0.1.clone(), current_entry.1.clone()));
                 } else {
                     break;
                 }
             }
-            Ok(nest(&flat_document)?.and_then(|value| {
-                Some(Document {
-                    id: document_id,
-                    value,
-                })
+            Ok(nest(&flat_document)?.map(|value| Document {
+                id: document_id,
+                value,
             }))
         } else {
             Ok(None)
@@ -1103,7 +1101,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{tests::test_chest::WriteTransaction, Document};
+    use crate::{Document, tests::test_chest::WriteTransaction};
     use fallible_iterator::FallibleIterator;
     use pretty_assertions::assert_eq;
 
@@ -1149,10 +1147,7 @@ mod tests {
         fn generate_string(&mut self) -> serde_json::Value {
             loop {
                 let result: String = (0..self.rng.generate_range(1..50))
-                    .map(|_| {
-                        let c = self.rng.generate_range(32..127) as u8 as char;
-                        c
-                    })
+                    .map(|_| self.rng.generate_range(32..127) as u8 as char)
                     .collect();
                 if result.parse::<u32>().is_err() {
                     return serde_json::Value::String(result);
@@ -1185,7 +1180,7 @@ mod tests {
         }
 
         fn generate_object(&mut self, depth: usize) -> serde_json::Value {
-            let generated_object = serde_json::Value::Object(
+            serde_json::Value::Object(
                 (0..self.rng.generate_range(1..self.max_object_size))
                     .map(|_| {
                         (
@@ -1194,8 +1189,7 @@ mod tests {
                         )
                     })
                     .collect::<serde_json::Map<_, _>>(),
-            );
-            generated_object
+            )
         }
 
         fn generate_primitive(&mut self) -> serde_json::Value {
@@ -1232,9 +1226,9 @@ mod tests {
                     let internal_path = path
                         .iter()
                         .cloned()
-                        .chain(vec![PathSegment::JsonObjectKey(key.clone())].into_iter())
+                        .chain(vec![PathSegment::JsonObjectKey(key.clone())])
                         .collect::<Path>();
-                    flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    flatten_to(internal_path, internal_value, result).with_context(|| {
                         format!("Can not get flat representation of value {internal_value:?} part")
                     })?;
                 }
@@ -1244,12 +1238,11 @@ mod tests {
                     let internal_path = path
                         .iter()
                         .cloned()
-                        .chain(
-                            vec![PathSegment::JsonArrayIndex(internal_value_index as u32)]
-                                .into_iter(),
-                        )
+                        .chain(vec![PathSegment::JsonArrayIndex(
+                            internal_value_index as u32,
+                        )])
                         .collect::<Path>();
-                    flatten_to(internal_path, &internal_value, result).with_context(|| {
+                    flatten_to(internal_path, internal_value, result).with_context(|| {
                         format!(
                             "Can not merge flat representation of value {internal_value:?} part \
                              into {result:?}"
@@ -1297,7 +1290,7 @@ mod tests {
                     assert!(transaction.main_bucket_contains_element(
                         document_id,
                         &new_search_path_from_path(&element_path_prefix),
-                        &element
+                        element
                     )?);
                     test_array_elements(document_id, &element_path_prefix, element, transaction)?;
                 }
@@ -1312,7 +1305,7 @@ mod tests {
                     assert!(transaction.main_bucket_contains_element(
                         document_id,
                         &new_search_path_from_path(&internal_value_path_prefix),
-                        &internal_value
+                        internal_value
                     )?);
                     test_array_elements(
                         document_id,
@@ -1385,9 +1378,9 @@ mod tests {
                                     true
                                 );
                                 let result =
-                                    transaction.main_bucket_get(&document_id, &vec![])?.unwrap();
+                                    transaction.main_bucket_get(document_id, &vec![])?.unwrap();
                                 assert_eq!(result, *document_value);
-                                let flatten_document = flatten(&vec![], &document_value)?;
+                                let flatten_document = flatten(&vec![], document_value)?;
                                 for (pathvalue_index, (path, value)) in
                                     flatten_document.iter().enumerate()
                                 {
@@ -1450,8 +1443,8 @@ mod tests {
                                                     assert_eq!(
                                                         transaction
                                                             .main_bucket_get(
-                                                                &selected_document_id,
-                                                                &path
+                                                                selected_document_id,
+                                                                path
                                                             )?
                                                             .unwrap(),
                                                         value_as_json
@@ -1464,22 +1457,26 @@ mod tests {
                                                 ));
                                             }
                                             PathSegment::JsonArrayIndex(current_array_index) => {
-                                                assert!(transaction
-                                                    .main_bucket_get(document_id, &base_path)?
-                                                    .unwrap()
-                                                    .is_array());
+                                                assert!(
+                                                    transaction
+                                                        .main_bucket_get(document_id, &base_path)?
+                                                        .unwrap()
+                                                        .is_array()
+                                                );
                                                 assert!(transaction.main_bucket_contains_element(
                                                     document_id,
                                                     &search_path,
                                                     &value_as_json
                                                 )?);
-                                                assert!(transaction
-                                                    .main_bucket_get_element_index(
-                                                        document_id,
-                                                        &search_path,
-                                                        &value_as_json
-                                                    )?
-                                                    .is_some());
+                                                assert!(
+                                                    transaction
+                                                        .main_bucket_get_element_index(
+                                                            document_id,
+                                                            &search_path,
+                                                            &value_as_json
+                                                        )?
+                                                        .is_some()
+                                                );
                                                 let selected = transaction
                                                     .main_bucket_select(
                                                         &vec![(
@@ -1491,14 +1488,17 @@ mod tests {
                                                     )?
                                                     .collect::<Vec<DocumentId>>()?;
                                                 for selected_document_id in selected.iter() {
-                                                    assert!(previously_added_documents
-                                                        .contains_key(selected_document_id));
-                                                    assert!(transaction
-                                                        .main_bucket_contains_element(
+                                                    assert!(
+                                                        previously_added_documents
+                                                            .contains_key(selected_document_id)
+                                                    );
+                                                    assert!(
+                                                        transaction.main_bucket_contains_element(
                                                             selected_document_id,
                                                             &search_path,
                                                             &value_as_json
-                                                        )?);
+                                                        )?
+                                                    );
                                                 }
                                                 assert!(selected.iter().any(
                                                     |selected_document_id| {
@@ -1519,14 +1519,10 @@ mod tests {
                                                     && !(path.len() > 1
                                                         && path[..path.len() - 1].iter().any(
                                                             |path_segment| {
-                                                                if let PathSegment::JsonArrayIndex(
-                                                                    _,
-                                                                ) = path_segment
-                                                                {
-                                                                    true
-                                                                } else {
-                                                                    false
-                                                                }
+                                                                matches!(
+                                                                    path_segment,
+                                                                    PathSegment::JsonArrayIndex(_,)
+                                                                )
                                                             },
                                                         ))
                                                 {
@@ -1572,10 +1568,7 @@ mod tests {
                                         for selected_document_id in selected.iter() {
                                             assert_eq!(
                                                 transaction
-                                                    .main_bucket_get(
-                                                        &selected_document_id,
-                                                        &vec![]
-                                                    )?
+                                                    .main_bucket_get(selected_document_id, &vec![])?
                                                     .unwrap(),
                                                 value_as_json
                                             );
@@ -1631,7 +1624,6 @@ mod tests {
                                 &flattened_document_to_remove_from
                                     .into_iter()
                                     .filter(|(path, _)| !path.starts_with(&path_to_remove))
-                                    .map(|(path, value)| (path, value.into()))
                                     .collect::<Vec<_>>(),
                             )?;
                             transaction
