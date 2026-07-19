@@ -24,12 +24,14 @@ impl DocumentId {
             value: *uuid::Uuid::now_v7().as_bytes(),
         }
     }
-    pub fn to_string(&self) -> String {
-        serde_json::to_value(self)
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string()
+}
+
+impl std::fmt::Display for DocumentId {
+    fn fmt(
+        &self,
+        formatter: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        formatter.write_str(serde_json::to_value(self).unwrap().as_str().unwrap())
     }
 }
 
