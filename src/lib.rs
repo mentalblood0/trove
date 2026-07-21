@@ -177,9 +177,10 @@ pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     }
 }
 
-#[derive(bincode::Encode, bincode::Decode, Clone, Debug)]
+#[derive(bincode::Encode, bincode::Decode, Clone, Debug, Default)]
 #[bincode(crate = "bincode")]
 pub enum Value {
+    #[default]
     Null,
     Integer(i64),
     Float(f64),
@@ -935,10 +936,13 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                 .next()
                 .with_context(|| "Can not get first data table entry")?;
         }
-        if let Some(first_document_entry) = self.last_entry.clone() {
-            let document_id = first_document_entry.0.0;
+        if let Some(first_document_entry) = &mut self.last_entry {
+            let document_id = std::mem::take(&mut first_document_entry.0.0);
             let mut flat_document: FlatDocument = Vec::new();
-            flat_document.push((first_document_entry.0.1, first_document_entry.1));
+            flat_document.push((
+                std::mem::take(&mut first_document_entry.0.1),
+                std::mem::take(&mut first_document_entry.1),
+            ));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
                     format!(
@@ -946,11 +950,14 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                         self.last_entry
                     )
                 })?;
-                if let Some(current_entry) = &self.last_entry {
+                if let Some(current_entry) = &mut self.last_entry {
                     if current_entry.0.0 != document_id {
                         break;
                     }
-                    flat_document.push((current_entry.0.1.clone(), current_entry.1.clone()));
+                    flat_document.push((
+                        std::mem::take(&mut current_entry.0.1),
+                        std::mem::take(&mut current_entry.1),
+                    ));
                 } else {
                     break;
                 }
