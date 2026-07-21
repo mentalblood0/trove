@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
 
@@ -95,7 +97,16 @@ pub enum PathSegment {
 pub type Path = Vec<PathSegment>;
 
 #[derive(
-    Debug, Clone, bincode::Encode, bincode::Decode, PartialOrd, Ord, PartialEq, Eq, serde::Serialize,
+    Debug,
+    Clone,
+    bincode::Encode,
+    bincode::Decode,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    Hash,
 )]
 #[bincode(crate = "bincode")]
 pub enum SearchPathSegment {
@@ -211,24 +222,20 @@ impl From<Value> for serde_json::Value {
     }
 }
 
-pub struct Digest {
-    pub value: [u8; 16],
-}
-
-impl Digest {
-    pub fn new(
-        document_id: Option<&DocumentId>,
-        search_path: &SearchPath,
-        value: &serde_json::Value,
-    ) -> Result<Self> {
-        let data = bincode::serde::encode_to_vec(
+pub fn hash(
+    document_id: Option<&DocumentId>,
+    search_path: &SearchPath,
+    value: &serde_json::Value,
+) -> [u8; 16] {
+    gxhash::gxhash128(
+        &bincode::serde::encode_to_vec(
             (document_id, search_path, value),
             bincode::config::standard(),
-        )?;
-        Ok(Self {
-            value: xxhash_rust::xxh3::xxh3_128(&data).to_le_bytes(),
-        })
-    }
+        )
+        .unwrap(),
+        0,
+    )
+    .to_le_bytes()
 }
 
 pub struct DocumentsIterator<'a> {
@@ -266,7 +273,7 @@ macro_rules! define_chest {
                 serde::{Serialize, Deserialize},
                 anyhow::{Result, Error, Context, anyhow},
                 dream, paste::paste, fallible_iterator::FallibleIterator,
-                DocumentId, Document, Path, DocumentsIterator, FlatDocument, Digest, PathSegment, nest,
+                DocumentId, Document, Path, DocumentsIterator, FlatDocument, PathSegment, nest, hash,
                 new_search_path_from_path, SearchPath
             };
 
@@ -379,24 +386,9 @@ macro_rules! define_chest {
                                 self.array_digests
                                     .entry(path_index)
                                     .or_insert(Vec::new())
-                                    .push(dream::Id(
-                                         Digest::new(Some(&self.document_id), &search_path, &value)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest for document id {:?}, search path {search_path:?} and value {value:?}",
-                                                    self.document_id
-                                                )
-                                            })?
-                                            .value,
-                                    ));
+                                    .push(dream::Id(hash(Some(&self.document_id), &search_path, &value)));
                             }
-                            self.digests.push(dream::Id(
-                                Digest::new(None, &search_path, &value)
-                                    .with_context(|| {
-                                        format!("Can not compute digest for search path {:?} and value {:?}", search_path, value)
-                                    })?
-                                    .value,
-                            ));
+                            self.digests.push(dream::Id(hash(None, &search_path, &value)));
                             Ok(self)
                         }
 
@@ -570,40 +562,14 @@ macro_rules! define_chest {
                                 let present_ids = {
                                     let mut result = Vec::new();
                                     for (search_path, value) in presention_conditions {
-                                        result.push(dream::Id(
-                                            Digest::new(
-                                                None,
-                                                &search_path,
-                                                &value,
-                                            )
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest of presention condition \
-                                                     ({search_path:?}, {value:?}"
-                                                )
-                                            })?
-                                            .value,
-                                        ));
+                                        result.push(dream::Id(hash(None, &search_path, &value)));
                                     }
                                     result
                                 };
                                 let absent_ids = {
                                     let mut result = Vec::new();
                                     for (search_path, value) in absention_conditions {
-                                        result.push(dream::Id(
-                                            Digest::new(
-                                                None,
-                                                &search_path,
-                                                &value,
-                                            )
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest of presention condition \
-                                                     ({search_path:?}, {value:?}"
-                                                )
-                                            })?
-                                            .value,
-                                        ));
+                                        result.push(dream::Id(hash(None, &search_path, &value)));
                                     }
                                     result
                                 };
@@ -746,16 +712,7 @@ macro_rules! define_chest {
                                 element: &serde_json::Value,
                             ) -> Result<bool> {
                                 self.index_transaction
-                                    .[<$bucket_name _has_object_with_tag>](&dream::Id(
-                                        Digest::new(Some(document_id), search_path, element)
-                                            .with_context(|| {
-                                                format!(
-                                                    "Can not compute digest for search path {search_path:?}, \
-                                                     document id {document_id:?} and value {element:?}",
-                                                )
-                                            })?
-                                            .value,
-                                    ))
+                                    .[<$bucket_name _has_object_with_tag>](&dream::Id(hash(Some(document_id), search_path, element)))
                             }
 
                             pub fn [<$bucket_name _get_element_index>](
@@ -767,17 +724,7 @@ macro_rules! define_chest {
                                 Ok(self
                                     .index_transaction
                                     .[<$bucket_name _search>](
-                                        &[dream::Id(
-                                            Digest::new(Some(document_id), path, element)
-                                                .with_context(|| {
-                                                    format!(
-                                                        "Can not compute digest for document id {:?}, search \
-                                                        path {path:?}, and value {element:?}",
-                                                        document_id
-                                                    )
-                                                })?
-                                                .value,
-                                        )],
+                                        &[dream::Id(hash(Some(document_id), path, element))],
                                         &[],
                                         None,
                                     )?
@@ -1339,13 +1286,13 @@ mod tests {
                                     (transaction.main_bucket_insert(json.clone()).unwrap(), json)
                                 })
                                 .collect::<Vec<_>>();
-                            println!(
-                                "add {:?}",
-                                new_documents
-                                    .iter()
-                                    .map(|(document_id, _)| document_id)
-                                    .collect::<Vec<_>>()
-                            );
+                            // println!(
+                            //     "add {:?}",
+                            //     new_documents
+                            //         .iter()
+                            //         .map(|(document_id, _)| document_id)
+                            //         .collect::<Vec<_>>()
+                            // );
                             previously_added_documents.extend(new_documents.clone());
                             assert_eq!(
                                 transaction
@@ -1581,7 +1528,7 @@ mod tests {
                                 .nth(rng.generate_range(0..previously_added_documents.len()))
                                 .unwrap()
                                 .clone();
-                            println!("remove {document_to_remove_id:?}");
+                            // println!("remove {document_to_remove_id:?}");
                             transaction.main_bucket_remove(&document_to_remove_id, &vec![])?;
                             previously_added_documents.remove(&document_to_remove_id);
                             assert_eq!(
@@ -1612,9 +1559,9 @@ mod tests {
                                 [rng.generate_range(1..flattened_document_to_remove_from.len())]
                             .0
                             .clone();
-                            println!(
-                                "remove {path_to_remove:?} from {document_to_remove_from_id:?}"
-                            );
+                            // println!(
+                            //     "remove {path_to_remove:?} from {document_to_remove_from_id:?}"
+                            // );
                             let correct_result_option = nest(
                                 &flattened_document_to_remove_from
                                     .into_iter()

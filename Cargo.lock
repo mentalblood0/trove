@@ -99,7 +99,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#a81a8debd78325394c51fba6ed22e5f3a79ef6d4"
+source = "git+https://github.com/mentalblood0/dream#7bf878cdbc1ea6aba2ec26cf53047989d15da023"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -178,6 +178,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gxhash"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3ce1bab7aa741d4e7042b2aae415b78741f267a98a7271ea226cd5ba6c43d7d"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -197,7 +206,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#00d5033c87258510174213d36a38076651faba46"
+source = "git+https://github.com/mentalblood0/lawn#e0149efb092306fe17b6f711ec0aa70beb0c090d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -209,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.186"
+version = "0.2.187"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+checksum = "a7743783ea728ef5c31194c6590797eed286449b4a4e87d626d8a51f0a94e732"
 
 [[package]]
 name = "lock_api"
@@ -358,7 +367,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/bourumir-wyngs/serde-saphyr#2aa569724d77029bbe4f8e7c4bbf1099ab3e02a8"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr#af9302538242a268a5dca6ba222b95c9e1ae7ae4"
 dependencies = [
  "annotate-snippets",
  "base64",
@@ -388,14 +397,14 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.0",
+ "syn 3.0.2",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
@@ -429,9 +438,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.0"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2fac314a64dc9a36e61a9eb4261a5e9bbfbc922b27e518af97bc32b926cf967"
+checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -447,6 +456,7 @@ dependencies = [
  "bincode",
  "dream",
  "fallible-iterator",
+ "gxhash",
  "nanorand",
  "paste",
  "pretty_assertions",
@@ -454,7 +464,6 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "uuid",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -542,12 +551,6 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "985eec839aaf2a1270af8f4ebcf63cf9401cfd90f0902f97c28d9f104ffbde72"
 
 [[package]]
 name = "yansi"
