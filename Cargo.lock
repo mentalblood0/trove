@@ -99,7 +99,7 @@ checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 [[package]]
 name = "dream"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/dream#2abd699f91d238ebcb19b154ca2a88a07f6310d7"
+source = "git+https://github.com/mentalblood0/dream#8194e39ccf7da58d8e9e7e35e829546cbbea74b7"
 dependencies = [
  "anyhow",
  "fallible-iterator",
@@ -206,7 +206,7 @@ dependencies = [
 [[package]]
 name = "lawn"
 version = "0.1.0"
-source = "git+https://github.com/mentalblood0/lawn#fe07fecf0657895eed5c69f9862dc11bc4689352"
+source = "git+https://github.com/mentalblood0/lawn#9c6c6fc506ba3a3a14a7b26c36df61bb85e01ae9"
 dependencies = [
  "anyhow",
  "bincode",
@@ -219,9 +219,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.188"
+version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22053b6a34f84abc97f9129e61334f40174659a1b9bd18c970b83db6a9a6348b"
+checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "lock_api"
@@ -404,7 +404,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -445,9 +445,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
