@@ -560,6 +560,9 @@ macro_rules! define_chest {
                                 absention_conditions: &Vec<(SearchPath, serde_json::Value)>,
                                 start_after_document: Option<DocumentId>,
                             ) -> Result<Box<dyn FallibleIterator<Item = DocumentId, Error = Error> + '_>> {
+                                if presention_conditions.is_empty() {
+                                    return Err(anyhow!("Need at least one presention condition"));
+                                }
                                 let present_ids = {
                                     let mut result = Vec::new();
                                     for (search_path, value) in presention_conditions {
@@ -1301,15 +1304,15 @@ mod tests {
                             //         .collect::<Vec<_>>()
                             // );
                             previously_added_documents.extend(new_documents.clone());
-                            assert_eq!(
-                                transaction
-                                    .main_bucket_select(&vec![], &vec![], None)?
-                                    .collect::<BTreeSet<_>>()?,
-                                previously_added_documents
-                                    .keys()
-                                    .cloned()
-                                    .collect::<BTreeSet<_>>()
-                            );
+                            // assert_eq!(
+                            //     transaction
+                            //         .main_bucket_select(&vec![], &vec![], None)?
+                            //         .collect::<BTreeSet<_>>()?,
+                            //     previously_added_documents
+                            //         .keys()
+                            //         .cloned()
+                            //         .collect::<BTreeSet<_>>()
+                            // );
                             assert_eq!(
                                 transaction
                                     .main_bucket_documents()?

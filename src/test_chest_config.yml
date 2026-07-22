@@ -1,4 +1,5 @@
 index:
+  maintain_only_tag_and_object_table: true
   database:
     log:
       path: /tmp/trove/test/TEST_NAME/log.dat
