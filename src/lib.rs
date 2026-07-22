@@ -1,4 +1,4 @@
-use std::{borrow::Cow, hash::Hash};
+use std::hash::Hash;
 
 use anyhow::{Context, Error, Result, anyhow};
 use fallible_iterator::FallibleIterator;
@@ -127,14 +127,14 @@ pub fn new_search_path_from_path(path: &Path) -> SearchPath {
         .collect::<Vec<_>>()
 }
 
-pub type FlatDocument<'a> = Vec<(Path, Cow<'a, Value>)>;
+pub type FlatDocument = Vec<(Path, Value)>;
 
 pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
     let mut result_is_some = false;
     if flat_document.is_empty() {
         Ok(None)
     } else if flat_document[0].0.is_empty() {
-        Ok(Some(flat_document[0].1.clone().into_owned().into()))
+        Ok(Some(flat_document[0].1.clone().into()))
     } else {
         let mut result = serde_json::Value::Null;
         for (path, value) in flat_document {
@@ -170,7 +170,7 @@ pub fn nest(flat_document: &FlatDocument) -> Result<Option<serde_json::Value>> {
                     }
                 }
             }
-            *current = value.clone().into_owned().into();
+            *current = value.clone().into();
             result_is_some = true;
         }
         Ok(if result_is_some { Some(result) } else { None })
@@ -239,12 +239,10 @@ pub fn hash(
     .to_le_bytes()
 }
 
-type DocumentEntryCows<'a> = (Cow<'a, (DocumentId, Path)>, Cow<'a, Value>);
-
 pub struct DocumentsIterator<'a> {
     pub data_table_iterator:
-        Box<dyn FallibleIterator<Item = DocumentEntryCows<'a>, Error = Error> + 'a>,
-    pub last_entry: Option<DocumentEntryCows<'a>>,
+        Box<dyn FallibleIterator<Item = ((DocumentId, Path), Value), Error = Error> + 'a>,
+    pub last_entry: Option<((DocumentId, Path), Value)>,
 }
 
 #[macro_export]
@@ -270,7 +268,7 @@ macro_rules! define_chest {
     }) => {
         #[allow(dead_code)]
         pub mod $chest_name {
-            use std::{ops::Bound, collections::HashMap, borrow::Cow};
+            use std::{ops::Bound, collections::HashMap};
 
             use $crate::{
                 serde::{Serialize, Deserialize},
@@ -508,7 +506,7 @@ macro_rules! define_chest {
                                 &'a self,
                                 document_id: &DocumentId,
                                 path_prefix: &Path,
-                            ) -> Result<FlatDocument<'a>> {
+                            ) -> Result<FlatDocument> {
                                 let mut flat_document: FlatDocument = Vec::new();
                                 let from_document_id_and_path = &(document_id.clone(), path_prefix.clone());
                                 let mut iterator = self
@@ -620,21 +618,21 @@ macro_rules! define_chest {
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .iter(iter_from, true)?
-                                    .take_while(|(current_document_id_and_current_path_cow, _)| {
-                                        Ok(&current_document_id_and_current_path_cow.0 == document_id
-                                            && current_document_id_and_current_path_cow.1.starts_with(&array_path)
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id
+                                            && current_path.starts_with(&array_path)
                                             && if let Some(PathSegment::JsonArrayIndex(_)) =
-                                                current_document_id_and_current_path_cow.1.get(array_path.len())
+                                                current_path.get(array_path.len())
                                             {
                                                 true
                                             } else {
                                                 false
                                             })
                                     })
-                                    .map(|(document_id_and_path_cow, _)| {
+                                    .map(|((_, result_path), _)| {
                                         found_document = true;
-                                        Ok(match document_id_and_path_cow.1.get(array_path.len()).ok_or_else(|| {
-                                            anyhow!("Can not get last element of result path {:?}", document_id_and_path_cow.1)
+                                        Ok(match result_path.get(array_path.len()).ok_or_else(|| {
+                                            anyhow!("Can not get last element of result path {result_path:?}")
                                         })? {
                                             PathSegment::JsonObjectKey(object_key) => {
                                                 return Err(anyhow!(
@@ -675,7 +673,7 @@ macro_rules! define_chest {
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .iter(Bound::Included(&(document_id.clone(), vec![])), false)?
-                                    .take_while(|(current_document_id_and_path_cow, _)| Ok(&current_document_id_and_path_cow.0 == document_id))
+                                    .take_while(|((current_document_id, _), _)| Ok(current_document_id == document_id))
                                     .next()?
                                     .is_some())
                             }
@@ -687,8 +685,8 @@ macro_rules! define_chest {
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
-                                    .take_while(|(current_document_id_and_path_cow, _)| {
-                                        Ok(&current_document_id_and_path_cow.0 == document_id && current_document_id_and_path_cow.1.starts_with(path))
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id && current_path.starts_with(path))
                                     })
                                     .next()?
                                     .is_some())
@@ -701,8 +699,8 @@ macro_rules! define_chest {
                                     .data
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .iter(Bound::Included(&(document_id.clone(), path.clone())), false)?
-                                    .take_while(|(current_document_id_and_path_cow, _)| {
-                                        Ok(&current_document_id_and_path_cow.0 == document_id && &current_document_id_and_path_cow.1 == path)
+                                    .take_while(|((current_document_id, current_path), _)| {
+                                        Ok(current_document_id == document_id && current_path == path)
                                     })
                                     .next()?
                                     .is_some())
@@ -732,7 +730,7 @@ macro_rules! define_chest {
                                         None,
                                     )?
                                     .next()?
-                                    .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id.clone().into_owned())))
+                                    .map(|dream_id| [<$bucket_name:camel IndexBatch>]::dream_id_to_u32(dream_id)))
                             }
                         }
                     )*
@@ -864,10 +862,10 @@ macro_rules! define_chest {
                                          from key {from_document_id_and_path:?}"
                                     )
                                 })?
-                                .take_while(|(current_document_id_and_path_cow, _)| {
-                                    Ok(current_document_id_and_path_cow.0 == *document_id && current_document_id_and_path_cow.1.starts_with(&path_prefix))
+                                .take_while(|((current_document_id, current_path), _)| {
+                                    Ok(*current_document_id == *document_id && current_path.starts_with(&path_prefix))
                                 })
-                                .map(|(current_document_id_and_path_cow, current_value)| Ok((current_document_id_and_path_cow.into_owned().1, current_value.into_owned())))
+                                .map(|((_, current_path), current_value)| Ok((current_path, current_value)))
                                 .collect::<Vec<_>>()
                                 .with_context(|| {
                                     format!(
@@ -884,7 +882,7 @@ macro_rules! define_chest {
                                     .[<$bucket_name _document_id_and_path_to_value>]
                                     .remove(&(document_id.clone(), current_path.clone()));
                                 index_batch
-                                    .push(&current_path, &current_value.clone().try_into()?)
+                                    .push(&current_path, &current_value.clone().into())
                                     .with_context(|| {
                                         format!(
                                             "Can not push path-value pair ({current_path:?}, {current_value:?}) into \
@@ -892,7 +890,7 @@ macro_rules! define_chest {
                                         )
                                     })?;
                             }
-                            if let Some(structure_to_remove) = nest(&paths_to_remove.into_iter().map(|(key, value)| (key, Cow::Owned(value))).collect())? {
+                            if let Some(structure_to_remove) = nest(&paths_to_remove)? {
                                 index_batch.push_complex_array_elements_from_structure(&path_prefix, &structure_to_remove)?;
                             }
                             index_batch
@@ -939,20 +937,11 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                 .with_context(|| "Can not get first data table entry")?;
         }
         if let Some(first_document_entry) = &mut self.last_entry {
-            let mut first_document_entry = (
-                std::mem::replace(
-                    &mut first_document_entry.0,
-                    Cow::Owned((DocumentId::default(), Path::default())),
-                )
-                .into_owned(),
-                std::mem::replace(&mut first_document_entry.1, Cow::Owned(Value::Null))
-                    .into_owned(),
-            );
             let document_id = std::mem::take(&mut first_document_entry.0.0);
             let mut flat_document: FlatDocument = Vec::new();
             flat_document.push((
                 std::mem::take(&mut first_document_entry.0.1),
-                Cow::Owned(std::mem::take(&mut first_document_entry.1)),
+                std::mem::take(&mut first_document_entry.1),
             ));
             loop {
                 self.last_entry = self.data_table_iterator.next().with_context(|| {
@@ -966,12 +955,7 @@ impl<'a> FallibleIterator for DocumentsIterator<'a> {
                         break;
                     }
                     flat_document.push((
-                        std::mem::replace(
-                            &mut current_entry.0,
-                            Cow::Owned((DocumentId::default(), Path::default())),
-                        )
-                        .into_owned()
-                        .1,
+                        std::mem::take(&mut current_entry.0.1),
                         std::mem::take(&mut current_entry.1),
                     ));
                 } else {
@@ -1218,16 +1202,16 @@ mod tests {
             _ => {
                 result.push((
                     path,
-                    Cow::Owned((*value).clone().try_into().with_context(|| {
+                    (*value).clone().try_into().with_context(|| {
                         format!("Can not convert json value {value:?} into database storable value")
-                    })?),
+                    })?,
                 ));
             }
         }
         Ok(())
     }
 
-    pub fn flatten<'a>(path: &'_ Path, value: &'a serde_json::Value) -> Result<FlatDocument<'a>> {
+    pub fn flatten(path: &Path, value: &serde_json::Value) -> Result<FlatDocument> {
         let mut result = FlatDocument::new();
         flatten_to(path.clone(), value, &mut result).with_context(|| {
             format!(
@@ -1361,8 +1345,7 @@ mod tests {
                                             true
                                         );
                                     }
-                                    let value_as_json: serde_json::Value =
-                                        value.clone().into_owned().into();
+                                    let value_as_json: serde_json::Value = value.clone().into();
                                     test_array_elements(
                                         document_id,
                                         &vec![],
